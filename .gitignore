@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.log
+*.pid
+*.seed
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Cookies (sensitive)
+cookies/
+
+# SurfSense reference codebase (separate repo)
+SurfSense/
+
+# Build artifacts
+backend/celerybeat-schedule
+backend/celerybeat-schedule-shm
+backend/celerybeat-schedule-wal
+frontend/tsconfig.tsbuildinfo
+
+# Crash dumps
+*.stackdump
+
+# Playwright MCP
+.playwright-mcp/
+
+# Playwright E2E
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/blob-report/
+/frontend/playwright/.cache/
+
+# Design files
+pencil-new.pen
+
+# Celery Beat schedule files
+celerybeat-schedule*

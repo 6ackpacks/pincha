@@ -1,0 +1,58 @@
+name: Daily Curate Pipeline
+
+on:
+  schedule:
+    # 21:00 UTC = 05:00 Beijing — trigger daily curate pipeline
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Target date (YYYY-MM-DD), defaults to today Beijing time"
+        required: false
+        type: string
+
+jobs:
+  trigger-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger curate v2 pipeline
+        run: |
+          TARGET_DATE="${{ github.event.inputs.target_date }}"
+          QUERY_PARAM=""
+          if [ -n "$TARGET_DATE" ]; then
+            QUERY_PARAM="?target_date=$TARGET_DATE"
+          fi
+
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" \
+            "${{ secrets.BACKEND_URL }}/api/v1/admin/curate-v2/trigger${QUERY_PARAM}")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/response.json
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::Pipeline trigger failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+  trigger-notifications:
+    runs-on: ubuntu-latest
+    needs: trigger-pipeline
+    steps:
+      - name: Wait for pipeline to complete
+        run: sleep 300
+
+      - name: Trigger daily notifications
+        run: |
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" \
+            "${{ secrets.BACKEND_URL }}/api/v1/admin/curate-v2/notify")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/response.json
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::warning::Notification trigger failed with status $HTTP_STATUS"
+          fi

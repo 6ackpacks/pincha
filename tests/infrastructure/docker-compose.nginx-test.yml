@@ -1,0 +1,49 @@
+# Minimal Docker Compose for Nginx routing tests.
+# Spins up Nginx + 2 mock upstream services to verify routing rules in isolation.
+#
+# Usage:
+#   docker compose -f tests/infrastructure/docker-compose.nginx-test.yml up -d
+#   ./tests/infrastructure/test_nginx_routing.sh --base-url http://localhost:8888
+#   ./tests/infrastructure/test_nginx_security.sh --base-url http://localhost:8888
+#   docker compose -f tests/infrastructure/docker-compose.nginx-test.yml down
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8888:80"
+    volumes:
+      - ../../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - mock-backend
+      - mock-frontend
+    networks:
+      default:
+        aliases:
+          - nginx
+
+  mock-backend:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        COPY mock_upstream.py /app/mock_upstream.py
+        WORKDIR /app
+        CMD ["python", "mock_upstream.py", "backend", "8000"]
+    networks:
+      default:
+        aliases:
+          - backend
+
+  mock-frontend:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        COPY mock_upstream.py /app/mock_upstream.py
+        WORKDIR /app
+        CMD ["python", "mock_upstream.py", "frontend", "3000"]
+    networks:
+      default:
+        aliases:
+          - frontend

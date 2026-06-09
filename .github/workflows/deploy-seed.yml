@@ -1,0 +1,69 @@
+name: Deploy & Seed
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_seed:
+        description: "Run curate v2 channel seed"
+        type: boolean
+        default: true
+      run_backfill:
+        description: "Run curate v2 backfill"
+        type: boolean
+        default: false
+      backfill_start:
+        description: "Backfill start date (YYYY-MM-DD)"
+        required: false
+        type: string
+      backfill_end:
+        description: "Backfill end date (YYYY-MM-DD)"
+        required: false
+        type: string
+
+jobs:
+  seed:
+    if: ${{ inputs.run_seed }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Seed curate v2 channels
+        run: |
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" \
+            "${{ secrets.BACKEND_URL }}/api/v1/admin/curate-v2/seed")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/response.json
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::Seed failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+  backfill:
+    if: ${{ inputs.run_backfill }}
+    runs-on: ubuntu-latest
+    needs: [seed]
+    steps:
+      - name: Backfill curate v2 picks
+        run: |
+          START="${{ inputs.backfill_start }}"
+          END="${{ inputs.backfill_end }}"
+
+          if [ -z "$START" ] || [ -z "$END" ]; then
+            echo "::error::backfill_start and backfill_end are required"
+            exit 1
+          fi
+
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "X-Admin-Token: ${{ secrets.ADMIN_TOKEN }}" \
+            "${{ secrets.BACKEND_URL }}/api/v1/admin/curate-v2/backfill?start_date=${START}&end_date=${END}")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          cat /tmp/response.json
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::Backfill failed with status $HTTP_STATUS"
+            exit 1
+          fi

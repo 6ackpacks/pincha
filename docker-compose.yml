@@ -1,0 +1,272 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    mem_limit: 300m
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 400m
+    command: ["sh", "-c", "pip install cachetools==5.5.0 && alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./cookies:/app/cookies
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - YOUTUBE_PROXY=${YOUTUBE_PROXY:-}
+      - YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+      - POT_PROVIDER_HTTP_BASE=http://bgutil-provider:4416
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bgutil-provider:
+        condition: service_started
+
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    restart: unless-stopped
+    environment:
+      - TOKEN_TTL=3600
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+    volumes:
+      - ./cookies:/cookies:ro
+    ports:
+      - "127.0.0.1:4416:4416"
+
+  celery_fast:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 600m
+    command: celery -A app.tasks.celery_app worker --loglevel=info -c 4 -Q pingcha
+    restart: always
+    volumes:
+      - ./backend:/app
+      - ./cookies:/app/cookies
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - YOUTUBE_PROXY=${YOUTUBE_PROXY:-}
+      - YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+      - POT_PROVIDER_HTTP_BASE=http://bgutil-provider:4416
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=redis,db,backend,frontend,minio,localhost,127.0.0.1,host.docker.internal
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      bgutil-provider:
+        condition: service_started
+
+  celery_pipeline:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 800m
+    command: celery -A app.tasks.celery_app worker --loglevel=info -c 10 -Q pingcha.pipeline
+    restart: always
+    volumes:
+      - ./backend:/app
+      - ./cookies:/app/cookies
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - YOUTUBE_PROXY=${YOUTUBE_PROXY:-}
+      - YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+      - POT_PROVIDER_HTTP_BASE=http://bgutil-provider:4416
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=redis,db,backend,frontend,minio,localhost,127.0.0.1,host.docker.internal
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      bgutil-provider:
+        condition: service_started
+
+  celery_cron:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 200m
+    command: celery -A app.tasks.celery_app worker --loglevel=info -c 1 -Q pingcha.cron
+    restart: always
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_curate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 400m
+    command: celery -A app.tasks.celery_app worker --loglevel=info -c 2 -Q pingcha.curate
+    restart: always
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=redis,db,backend,frontend,minio,localhost,127.0.0.1,host.docker.internal
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    mem_limit: 150m
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    restart: always
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg16
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      - POSTGRES_DB=pingcha
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    mem_limit: 300m
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    mem_limit: 200m
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rsshub:
+    image: diygod/rsshub:latest
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: redis
+      REDIS_URL: "redis://redis:6379/3"
+      PROXY_URI: ${RSSHUB_PROXY_URI:-}
+      ACCESS_KEY: ${RSSHUB_ACCESS_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    mem_limit: 50m
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

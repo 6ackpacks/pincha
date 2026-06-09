@@ -1,0 +1,110 @@
+# Docker Compose test override
+# Speeds up healthchecks and isolates from external dependencies for CI.
+# Usage: docker compose -f docker-compose.yml -f tests/infrastructure/docker-compose.test.yml up -d
+#
+# Note: Host port bindings from the base file are inherited. In CI environments
+# where port conflicts matter, use --scale or network_mode adjustments.
+
+services:
+  db:
+    healthcheck:
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    healthcheck:
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  minio:
+    healthcheck:
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+
+  backend:
+    healthcheck:
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - LITELLM_API_KEY=test-placeholder
+      - LITELLM_API_BASE=http://localhost:4000
+      - LLM_MODEL=test-placeholder
+      - OAUTH_CLIENT_ID=test-placeholder
+      - OAUTH_CLIENT_SECRET=test-placeholder
+      - OAUTH_REDIRECT_URI=http://localhost/callback
+      - JWT_SECRET=test-placeholder-secret
+      - YOUTUBE_PROXY=
+      - YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+      - POT_PROVIDER_HTTP_BASE=http://bgutil-provider:4416
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+
+  frontend:
+    environment:
+      - BACKEND_URL=http://backend:8000
+
+  celery_fast:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - LITELLM_API_KEY=test-placeholder
+      - LITELLM_API_BASE=http://localhost:4000
+      - YOUTUBE_PROXY=
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+
+  celery_pipeline:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - LITELLM_API_KEY=test-placeholder
+      - LITELLM_API_BASE=http://localhost:4000
+      - YOUTUBE_PROXY=
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+
+  celery_cron:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+
+  celery_curate:
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/pingcha
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - LITELLM_API_KEY=test-placeholder
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+
+  celery_beat:
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+
+  bgutil-provider:
+    environment:
+      - TOKEN_TTL=3600
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+
+  nginx: {}
