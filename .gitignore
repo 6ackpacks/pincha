@@ -62,6 +62,9 @@ frontend/tsconfig.tsbuildinfo
 # Crash dumps
 *.stackdump
 
+# MCP config (contains API tokens)
+.mcp.json
+
 # Playwright MCP
 .playwright-mcp/
 

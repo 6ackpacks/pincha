@@ -51,8 +51,8 @@
 
 **后端**
 - FastAPI + SQLAlchemy async + asyncpg（PostgreSQL 16 + pgvector）
-- Celery 5 + Redis（三队列：`pingcha` / `pingcha.pipeline` / `pingcha.cron`）
-- LiteLLM（多模型摘要）/ faster-whisper（ASR）/ yt-dlp（字幕）
+- Celery 5 + Redis（四队列：`pingcha` / `pingcha.pipeline` / `pingcha.curate` / `pingcha.cron`）
+- LiteLLM（多模型摘要）/ Whisper（ASR）/ yt-dlp（字幕）
 
 **前端**
 - Next.js 15 + React 19，standalone 输出模式
@@ -66,7 +66,97 @@
 
 ---
 
-## Docker 架构与端口映射
+## 快速开始
+
+### 1. 克隆项目并配置环境变量
+
+```bash
+git clone https://github.com/6ackpacks/pincha.git
+cd pincha
+cp .env.example .env
+```
+
+### 2. 配置 AI 服务（必须）
+
+品猹的 AI 功能（摘要、知识图谱、向量检索）统一通过 **TokenDance** 网关接入，只需一个 API Key：
+
+1. 注册 [TokenDance](https://tokendance.space)，获取 API Key
+2. 在 `.env` 中填入：
+
+```bash
+OPENAI_API_KEY=sk-your-tokendance-api-key
+SUMMARY_API_BASE=https://tokendance.space/gateway/v1
+```
+
+这一步完成后，摘要生成、Wiki 编译、Embedding 向量化、Whisper ASR 等全部 AI 功能即可使用。
+
+### 3. 配置字幕获取（推荐）
+
+视频字幕是整个处理管线的入口。推荐配置 **TikHub** 实现零代理字幕获取：
+
+1. 注册 [TikHub](https://tikhub.io)，获取 API Key（约 0.001 元/次）
+2. 在 `.env` 中填入：
+
+```bash
+TIKHUB_API_KEY=your-tikhub-api-key
+```
+
+TikHub 服务端代理 YouTube API，国内服务器无需翻墙即可获取字幕。如果不配置 TikHub，系统会回退到 `youtube-transcript-api` 和 `yt-dlp`（需要代理环境）。
+
+### 4. 安全配置
+
+```bash
+# 生成 JWT 密钥（生产环境必须修改！）
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 将输出填入 .env 的 JWT_SECRET_KEY
+```
+
+> ⚠️ 默认的数据库密码、MinIO 密钥、JWT 密钥仅供本地开发。生产部署前务必全部替换为强随机值。
+
+### 5. 启动服务
+
+```bash
+# Docker 全栈启动
+docker-compose up -d
+
+# 数据库迁移
+docker-compose exec backend alembic upgrade head
+```
+
+访问 http://localhost 即可使用。
+
+### 6. 验证配置
+
+提交一个 YouTube 视频 URL 测试完整管线：
+- 字幕提取成功 → TikHub 或 yt-dlp 工作正常
+- 摘要生成成功 → TokenDance API 工作正常
+- 如果字幕提取失败但显示"ASR 语音识别中" → 说明正在使用 Whisper 兜底（正常）
+
+---
+
+## 本地开发（不使用 Docker）
+
+```bash
+# 基础设施（数据库 + Redis）
+docker-compose -f docker-compose.infra.yml up -d
+
+# 后端
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# 前端
+cd frontend
+npm install
+npm run dev   # http://localhost:3000
+
+# Celery worker（在 backend/ 目录下）
+celery -A app.tasks.celery_app worker -Q pingcha -c 4
+```
+
+---
+
+## Docker 架构
 
 ### 服务拓扑
 
@@ -92,136 +182,17 @@
      └────────────┘  └──────────┘  └──────────┘
 ```
 
-### 端口映射表
-
-| 服务 | 容器内端口 | 宿主机端口 | 说明 |
-|------|-----------|-----------|------|
-| **nginx** | 80 | **80** | 主入口，反向代理 |
-| **frontend** | 8080 | 3000 | Next.js dev server（Turbopack） |
-| **backend** | 8000 | 8000 | FastAPI |
-| **db** | 5432 | 5432 | PostgreSQL 16 + pgvector |
-| **redis** | 6379 | 6379 | Redis 7 |
-| **minio** | 9000/9001 | 9000/9001 | S3 存储 / 控制台 |
-| **content-service** | 8000 | 8100 | 内容服务（独立微服务） |
-| **bgutil-provider** | 4416 | 4416 | YouTube PoT 提供者 |
-
 ### Celery Workers
 
 | Worker | 队列 | 并发 | 职责 |
 |--------|------|------|------|
 | celery_fast | `pingcha` | 4 | 通用任务（摘要、ASR） |
 | celery_pipeline | `pingcha.pipeline` | 10 | 视频/文章处理管线 |
-| celery_cron | `pingcha.cron` | 1 | 心跳检查 |
+| celery_cron | `pingcha.cron` | 1 | 定时任务 |
 | celery_curate | `pingcha.curate` | 2 | 内容遴选 pipeline |
 | celery_beat | — | — | 定时任务调度器 |
 
-### 定时任务
-
-| 任务 | 触发时间（北京） | 说明 |
-|------|----------------|------|
-| `daily_curate_pipeline` | 每日 05:00 | 拉取昨日内容 → 评分 → LLM 分类 → 入库 |
-| `send_daily_notifications` | 每日 08:00 | 创建通知 + 发送邮件摘要 |
-
-### 启动命令
-
-```bash
-# 完整启动（首次或重建后）
-docker-compose up -d
-
-# 仅重启前端（不丢失 node_modules）
-docker-compose restart frontend
-
-# 如果前端报 MODULE_NOT_FOUND 错误
-docker-compose stop frontend
-docker-compose rm -f frontend
-docker-compose up -d frontend
-# 等待 ~90s（npm install + 编译）
-
-# 查看前端编译状态
-docker-compose logs frontend --tail 5
-# 看到 "✓ Ready in Xs" 表示启动成功
-```
-
-### 注意事项
-
-- **Frontend 监听 8080 端口**（不是 3000），Dockerfile 中配置。宿主机通过 `3000:8080` 映射访问
-- **Nginx 代理到 frontend:8080**，不是 frontend:3000
-- **Frontend 使用匿名 volume** (`/app/node_modules`) 隔离容器内的 Linux 二进制依赖和宿主机的 macOS 依赖
-- **首次启动需要等待 npm install**（约 60-90 秒），之后重启会复用缓存
-- **访问入口是 `http://localhost:80`**（nginx），不要直接访问 3000 端口
-
 ---
-
-## 快速开始
-
-> ⚠️ **安全配置必读**
-> 
-> 在生产环境部署前，**必须**修改以下配置：
-> 
-> 1. **JWT 密钥**：在 `.env` 中设置 `JWT_SECRET_KEY`，使用至少 32 字符的随机字符串
->    ```bash
->    # 生成强随机密钥
->    python -c "import secrets; print(secrets.token_urlsafe(32))"
->    ```
-> 2. **数据库密码**：修改 `.env` 中的 `POSTGRES_PASSWORD`（默认 `postgres` 仅供本地开发）
-> 3. **MinIO 密钥**：修改 `MINIO_ROOT_USER` 和 `MINIO_ROOT_PASSWORD`（默认 `minioadmin` 仅供本地开发）
-> 4. **管理员 Token**：设置 `ADMIN_TOKEN` 为强随机字符串
-> 
-> **默认配置仅供本地开发使用，生产环境使用默认密钥存在严重安全风险！**
-
-### 1. 克隆项目并配置环境变量
-
-```bash
-# 复制环境变量
-cp .env.example .env
-# 填写 OPENAI_API_KEY / DATABASE_URL 等
-```
-
-### 2. 启动所有服务
-
-```bash
-docker-compose up -d
-```
-
-### 3. 执行数据库迁移
-
-```bash
-docker-compose exec backend alembic upgrade head
-```
-
-访问 http://localhost 即可使用。
-
-## 本地开发
-
-### 一键启动脚本（不使用 Docker）
-
-```bash
-# macOS/Linux 一键启动所有服务
-bash start-local.sh all
-
-# 单独启动某个服务
-bash start-local.sh [infra|backend|celery|pipeline|cron|beat|frontend]
-
-# Windows
-.\start-local.ps1
-```
-
-### 手动启动各服务
-
-```bash
-# 后端
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-
-# 前端
-cd frontend
-npm install
-npm run dev   # http://localhost:3000
-
-# Celery worker
-celery -A app.tasks.celery_app worker -Q pingcha -c 4
-```
 
 ## 数据模型
 
@@ -238,7 +209,7 @@ wiki            — 编译后的知识文档
 ## 目录结构
 
 ```
-pingcha/
+pincha/
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/        # FastAPI 路由
@@ -260,17 +231,20 @@ pingcha/
 
 ## 环境变量
 
-⚠️ **生产环境必须修改所有默认密钥和密码！** 详见"快速开始"章节的安全警告。
+详见 `.env.example`，按用途分组：
 
-参见 `.env.example`，关键变量：
-
-| 变量 | 说明 |
-|------|------|
-| `DATABASE_URL` | PostgreSQL 连接串 |
-| `REDIS_URL` | Redis 连接串 |
-| `OPENAI_API_KEY` | LLM API 密钥（LiteLLM 支持多提供商） |
-| `MINIO_*` | 对象存储配置 |
-| `WHISPER_MODEL` | ASR 模型大小（默认 `base`） |
+| 分组 | 关键变量 | 说明 |
+|------|---------|------|
+| **AI 功能** | `OPENAI_API_KEY` | TokenDance API Key，驱动所有 AI 能力 |
+| | `SUMMARY_API_BASE` | TokenDance 网关地址 |
+| **字幕获取** | `TIKHUB_API_KEY` | TikHub 字幕服务（推荐，国内免代理） |
+| | `YOUTUBE_PROXY` | yt-dlp 代理（不用 TikHub 时需要） |
+| **基础设施** | `DATABASE_URL` | PostgreSQL 连接串 |
+| | `REDIS_URL` | Redis 连接串 |
+| | `MINIO_*` | 对象存储配置 |
+| **安全** | `JWT_SECRET_KEY` | JWT 签名密钥（≥32 字符） |
+| | `ADMIN_TOKEN` | 管理后台 Token |
+| **认证** | `WATCHA_*` | 观猹 OAuth2 配置 |
 
 ## 认证系统说明
 
@@ -289,3 +263,6 @@ pingcha/
 
 我们计划在未来版本中支持多种认证方式。欢迎贡献代码！
 
+## License
+
+[Apache License 2.0](LICENSE)
