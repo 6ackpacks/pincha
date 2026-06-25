@@ -12,9 +12,17 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --ingroup nodejs nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next
+
+USER nextjs
 
 EXPOSE 8080
 ENV PORT=8080

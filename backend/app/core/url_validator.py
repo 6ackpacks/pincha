@@ -226,7 +226,8 @@ class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
                 raise SSRFError(f"IP address '{hostname}' is in a private/reserved range")
             return await super().handle_async_request(request)
 
-        # Resolve and validate, then pin to the first public IP we find.
+        # Resolve once, validate every returned address, then pin the connection
+        # to a single validated IP.
         try:
             addrinfos = await asyncio.to_thread(
                 socket.getaddrinfo,
@@ -241,18 +242,24 @@ class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
         if not addrinfos:
             raise SSRFError(f"No DNS records found for '{hostname}'")
 
-        safe_ip = None
-        for _family, _type, _proto, _canonname, sockaddr in addrinfos:
+        # Validate ALL addresses: any private IP in the answer set is treated as
+        # hostile (an attacker may be racing public/private answers). Pinning to a
+        # single IP loses httpx's multi-record connect fallback, so prefer IPv4 —
+        # it is broadly routable, whereas IPv6 fails on IPv4-only hosts/containers.
+        ipv4_ip = None
+        ipv6_ip = None
+        for family, _type, _proto, _canonname, sockaddr in addrinfos:
             ip_str = sockaddr[0]
             if _is_private_ip(ip_str):
-                # Any private IP in the record set is treated as hostile (the
-                # attacker may be racing public/private answers).
                 raise SSRFError(
                     f"Hostname '{hostname}' resolves to private IP '{ip_str}'"
                 )
-            if safe_ip is None:
-                safe_ip = ip_str
+            if family == socket.AF_INET and ipv4_ip is None:
+                ipv4_ip = ip_str
+            elif family == socket.AF_INET6 and ipv6_ip is None:
+                ipv6_ip = ip_str
 
+        safe_ip = ipv4_ip or ipv6_ip
         if safe_ip is None:
             raise SSRFError(f"No usable IP for '{hostname}'")
 

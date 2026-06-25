@@ -199,9 +199,8 @@ async def pipeline_health(x_admin_token: str | None = Header(None, alias="X-Admi
     """Check if pipeline dependencies are accessible. Requires admin token."""
     admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
     if not admin_token:
-        if settings.ENVIRONMENT != "development":
-            raise HTTPException(status_code=503, detail="Admin token not configured")
-    elif not x_admin_token or not _secrets.compare_digest(x_admin_token, admin_token):
+        raise HTTPException(status_code=503, detail="Admin token not configured")
+    if not x_admin_token or not _secrets.compare_digest(x_admin_token, admin_token):
         raise HTTPException(status_code=403, detail="Invalid admin token")
     checks = {}
 
@@ -219,7 +218,7 @@ async def pipeline_health(x_admin_token: str | None = Header(None, alias="X-Admi
 
     # Check proxy
     proxy = os.environ.get("HTTP_PROXY", "")
-    checks["proxy"] = proxy if proxy else "not set"
+    checks["proxy"] = "set" if proxy else "not set"
 
     # Check API keys
     checks["dashscope_key"] = "set" if settings.DASHSCOPE_API_KEY else "missing"

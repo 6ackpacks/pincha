@@ -13,7 +13,6 @@ _env_file = _env_local if _env_local.exists() else _project_root / ".env"
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    ENVIRONMENT: str = "production"  # "development" | "production"
     APP_ENV: str = "production"  # default to production for safety
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@db:5432/pingcha"

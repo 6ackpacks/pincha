@@ -25,8 +25,6 @@ _USER_CACHE: TTLCache = TTLCache(maxsize=200, ttl=300)
 # L2: Redis cache TTL
 _USER_REDIS_TTL = 300  # 5 min
 
-_ANON_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-
 # Token blacklist key prefix
 _BLACKLIST_PREFIX = "token:blacklist:"
 # Whitelisted fields for L2 Redis cache restoration (is_admin intentionally excluded)
@@ -86,18 +84,6 @@ async def invalidate_user_cache(user_id: str) -> None:
         logger.debug("Redis operation failed (degraded): %s", exc)
 
 
-async def _get_or_create_anon_user(db: AsyncSession) -> User:
-    result = await db.execute(select(User).where(User.id == _ANON_USER_ID))
-    user = result.scalar_one_or_none()
-    if user:
-        return user
-    user = User(id=_ANON_USER_ID, watcha_user_id=0, nickname="访客", name="访客", avatar_url="")
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
 async def get_current_user(
     session: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_session),
@@ -122,7 +108,9 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as exc:
-        # Redis unavailable — degrade gracefully, don't block login
+        # Availability tradeoff: if Redis is down, skip blacklist check rather than
+        # blocking all authenticated requests. This means a logged-out JWT may remain
+        # usable until its natural expiry (7 days) during a Redis outage.
         logger.debug("Redis operation failed (degraded): %s", exc)
 
     # L1: in-process cache (TTLCache handles expiry automatically)

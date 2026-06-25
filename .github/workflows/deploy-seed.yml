@@ -20,6 +20,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   seed:
     if: ${{ inputs.run_seed }}
@@ -46,10 +49,10 @@ jobs:
     needs: [seed]
     steps:
       - name: Backfill curate v2 picks
+        env:
+          START: ${{ inputs.backfill_start }}
+          END: ${{ inputs.backfill_end }}
         run: |
-          START="${{ inputs.backfill_start }}"
-          END="${{ inputs.backfill_end }}"
-
           if [ -z "$START" ] || [ -z "$END" ]; then
             echo "::error::backfill_start and backfill_end are required"
             exit 1

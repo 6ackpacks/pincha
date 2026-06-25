@@ -71,8 +71,8 @@ async def ingest(
 
     try:
         result = await ingest_video(video_id, db)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="字幕不存在，无法向量化")
     return IngestResponse(
         chunks_count=result["chunks_count"],
         message=f"成功向量化 {result['chunks_count']} 个文本块",

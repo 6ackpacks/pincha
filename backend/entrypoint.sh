@@ -26,6 +26,7 @@ case "${SERVICE_MODE:-web}" in
       fi
       echo "Migrations complete."
     fi
-    exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
+    exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} \
+      --proxy-headers --forwarded-allow-ips='*'
     ;;
 esac

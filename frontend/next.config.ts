@@ -46,6 +46,38 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    const csp = [
+      "default-src 'self'",
+      // 'unsafe-inline': inline rAF shim in layout.tsx; 'unsafe-eval': markmap/xgplayer
+      // youtube.com: YT IFrame API script
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: blob: https:",
+      // media-src https:: direct video/HLS streams (backend/MinIO/CDN); blob: HLS buffers
+      "media-src 'self' blob: https:",
+      // connect-src https:: HLS segment fetches + Sentry ingest
+      "connect-src 'self' https:",
+      // frame-src: YouTube iframe embeds
+      "frame-src 'self' https://www.youtube.com",
+      "worker-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'self'",
+    ].join("; ");
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "Content-Security-Policy", value: csp },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default withSentryConfig(nextConfig, {
