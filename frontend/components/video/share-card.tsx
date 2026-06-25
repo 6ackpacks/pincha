@@ -285,7 +285,7 @@ export function ShareCard({ video, videoId, onClose }: ShareCardProps) {
                   opacity: 0.7,
                 }}
               >
-                pingcha.app
+                {typeof window !== "undefined" ? window.location.host : "品猹"}
               </span>
             </div>
           </div>

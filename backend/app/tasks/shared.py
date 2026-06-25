@@ -19,7 +19,7 @@ _sync_engine: Engine | None = None
 
 
 def _resolve_database_url() -> str:
-    """Resolve sync database URL from environment (supports Zeabur readonly vars)."""
+    """Resolve sync database URL from environment (supports PaaS platform readonly vars)."""
     # Priority: DATABASE_URL > POSTGRES_URI > settings default
     db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI") or settings.DATABASE_URL
     # Convert async driver to sync
@@ -81,7 +81,7 @@ _sync_redis: redis.Redis | None = None
 
 
 def _resolve_redis_url() -> str:
-    """Resolve Redis URL from environment (supports Zeabur readonly vars)."""
+    """Resolve Redis URL from environment (supports PaaS platform readonly vars)."""
     url = os.getenv("REDIS_URL") or os.getenv("REDIS_URI") or os.getenv("REDIS_CONNECTION_STRING")
     return url if url else settings.REDIS_URL
 

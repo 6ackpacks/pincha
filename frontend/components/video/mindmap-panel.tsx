@@ -184,6 +184,9 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
       svgRef.current.setAttribute("height", String(effectiveHeight));
 
       const transformer = new Transformer();
+      // 禁用 HTML 解析，防止 LLM 生成的内容注入脚本（存储型 XSS）
+      const md = transformer.md as { set?: (opts: { html: boolean }) => void };
+      md?.set?.({ html: false });
       const { root } = transformer.transform(cleanMarkdown);
 
       // Destroy previous instance and clear SVG children

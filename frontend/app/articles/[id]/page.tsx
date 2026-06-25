@@ -420,6 +420,9 @@ function ArticleMindmapView({ markdown }: { markdown: string }) {
       if (cancelled || !svgRef.current) return;
 
       const transformer = new Transformer();
+      // 禁用 HTML 解析，防止 LLM 生成的内容注入脚本（存储型 XSS）
+      const md = transformer.md as { set?: (opts: { html: boolean }) => void };
+      md?.set?.({ html: false });
       const { root } = transformer.transform(markdown);
 
       if (mmRef.current) {

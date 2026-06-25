@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone
+from urllib.parse import urlparse
 
 import resend
 from sqlalchemy import select, text
@@ -116,6 +117,7 @@ def send_email_digests(pick_date: date, engine: Engine) -> int:
         return 0
 
     resend.api_key = settings.RESEND_API_KEY
+    sender_domain = urlparse(settings.FRONTEND_URL).hostname or "pingcha.app"
     sent = 0
 
     with engine.connect() as conn:
@@ -210,7 +212,7 @@ def send_email_digests(pick_date: date, engine: Engine) -> int:
 
             try:
                 resend.Emails.send({
-                    "from": "品猹每日精选 <digest@pingcha.app>",
+                    "from": f"品猹每日精选 <digest@{sender_domain}>",
                     "to": email,
                     "subject": f"品猹每日精选 · {date_str}",
                     "html": html_body,

@@ -47,21 +47,15 @@ if _sentry_dsn:
     logger.info("Sentry initialized (env=%s, traces=%.0f%%)", _env, (1.0 if _is_dev else 0.2) * 100)
 
 # ---------------------------------------------------------------------------
-# Security: warn if JWT secret is still the default placeholder
+# Security: block startup if JWT secret is still the default placeholder
 # ---------------------------------------------------------------------------
 _JWT_DEFAULT = "changeme-use-a-long-random-secret"
 if settings.JWT_SECRET_KEY == _JWT_DEFAULT:
-    _is_dev = settings.APP_ENV == "development" or settings.ENVIRONMENT == "development"
-    if _is_dev:
-        logger.critical(
-            "JWT_SECRET_KEY is using the insecure default value! "
-            "Set a strong random secret before deploying to production."
-        )
-    else:
-        raise RuntimeError(
-            "JWT_SECRET_KEY must not use the default value in non-development environments. "
-            "Set a strong random secret via the JWT_SECRET_KEY environment variable."
-        )
+    raise RuntimeError(
+        "JWT_SECRET_KEY is using the insecure default value. "
+        "Generate a secure key: python -c \"import secrets; print(secrets.token_urlsafe(32))\" "
+        "and set it in your .env file."
+    )
 
 # ---------------------------------------------------------------------------
 # Security: warn if DATABASE_URL / REDIS_URL still use default/local values in production

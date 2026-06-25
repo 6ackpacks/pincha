@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 # SSRF 防护：仅允许标准 HTTP/HTTPS 端口
 ALLOWED_PORTS = {80, 443}
 
-# Internal hostnames that should never be reached from user-supplied URLs
+# Internal hostnames that should never be reached from user-supplied URLs.
+# Covers common PaaS/cloud internal hostnames and cloud metadata endpoints.
 _BLOCKED_HOSTNAME_PATTERNS = (
     "service-",
     ".zeabur.internal",

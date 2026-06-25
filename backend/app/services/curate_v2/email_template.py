@@ -2,6 +2,8 @@
 
 import html
 
+from app.config import settings
+
 
 def _safe_url(url: str) -> str:
     """URL 协议白名单检查，只允许 http:// 和 https://，防止 javascript: 注入。"""
@@ -16,7 +18,7 @@ def render_daily_digest_email(
     pick_date: str,
     channels_picks: dict[str, list[dict]],
     unsubscribe_url: str,
-    frontend_url: str = "https://pingcha.app",
+    frontend_url: str = "",
 ) -> str:
     """
     Render HTML email for the daily digest.
@@ -27,11 +29,14 @@ def render_daily_digest_email(
         channels_picks: Mapping of channel_name -> list of pick dicts.
             Each pick dict should have: title, summary, original_url.
         unsubscribe_url: One-click unsubscribe link.
-        frontend_url: Base URL of the frontend app.
+        frontend_url: Base URL of the frontend app. Defaults to settings.FRONTEND_URL.
 
     Returns:
         Complete HTML string ready to send as email body.
     """
+    if not frontend_url:
+        frontend_url = settings.FRONTEND_URL
+
     channels_html = _render_channels(channels_picks)
     curate_url = f"{html.escape(frontend_url, quote=True)}/curate"
 

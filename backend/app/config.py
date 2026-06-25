@@ -91,19 +91,19 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Patch: ensure env vars are loaded even if pydantic-settings missed them
-# (workaround for Zeabur container env injection timing)
+# (workaround for container platforms that inject vars late)
 for field_name in Settings.model_fields:
     env_val = os.environ.get(field_name)
     if env_val and not getattr(settings, field_name, None):
         object.__setattr__(settings, field_name, env_val)
 
-# Zeabur readonly variable fallbacks (service linking injects these names)
-_zeabur_fallbacks = {
+# Platform fallback variables (some PaaS platforms inject these names via service linking)
+_platform_fallbacks = {
     "REDIS_URL": os.environ.get("REDIS_URI") or os.environ.get("REDIS_CONNECTION_STRING"),
     "DATABASE_URL": os.environ.get("POSTGRES_URI") or os.environ.get("POSTGRES_CONNECTION_STRING"),
     "CELERY_BROKER_URL": None,  # handled in celery_app.py
 }
-for field_name, fallback_val in _zeabur_fallbacks.items():
+for field_name, fallback_val in _platform_fallbacks.items():
     if fallback_val and field_name in Settings.model_fields:
         current = getattr(settings, field_name, "")
         # Only override if current value is the default (contains docker-compose hostnames)

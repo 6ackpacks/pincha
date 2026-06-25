@@ -9,14 +9,14 @@ def _resolve_broker_url() -> str:
 
     Priority:
     1. CELERY_BROKER_URL (explicit)
-    2. REDIS_URI / REDIS_CONNECTION_STRING (Zeabur readonly injection) + /1 db
+    2. REDIS_URI / REDIS_CONNECTION_STRING (PaaS platform readonly injection) + /1 db
     3. Fallback to redis://redis:6379/1 (docker-compose default)
     """
     explicit = os.getenv("CELERY_BROKER_URL")
     if explicit:
         return explicit
 
-    # Zeabur injects REDIS_URI or REDIS_CONNECTION_STRING via service linking
+    # Some PaaS platforms inject REDIS_URI or REDIS_CONNECTION_STRING via service linking
     redis_base = os.getenv("REDIS_URI") or os.getenv("REDIS_CONNECTION_STRING")
     if redis_base:
         # Ensure we use db 1 for Celery broker (db 0 is for app cache)
@@ -65,7 +65,7 @@ celery_app.conf.update(
         "app.tasks.article_tasks.process_article": {"queue": "pingcha.pipeline"},
         "app.tasks.article_tasks.*": {"queue": "pingcha"},
         "app.tasks.wiki_tasks.*": {"queue": "pingcha.pipeline"},
-        # Zeabur currently runs one worker that consumes pingcha + pingcha.pipeline.
+        # The container platform currently runs one worker that consumes pingcha + pingcha.pipeline.
         # Keep scheduled/light tasks on those live queues until dedicated workers exist.
         "app.tasks.curate_v2_tasks.*": {"queue": "pingcha.pipeline"},
         "app.tasks.schedule_tasks.*": {"queue": "pingcha"},

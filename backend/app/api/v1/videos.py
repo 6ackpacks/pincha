@@ -27,6 +27,7 @@ from app.core.cache import (
 )
 from app.core.database import get_session
 from app.core.deps import require_user_video
+from app.core.url_validator import validate_url_async, SSRFError
 from app.core.redis import get_redis
 from app.config import settings
 from app.models.summary import Summary
@@ -113,6 +114,11 @@ async def submit_video(
     - If new, creates the video record, links it to the user, dispatches the pipeline, returns 201.
     """
     url_str = str(payload.url)
+
+    try:
+        await validate_url_async(url_str)
+    except SSRFError:
+        raise HTTPException(status_code=400, detail="URL 不允许：目标地址为内网或受限网络")
 
     existing = (await db.execute(
         select(Video).where(Video.url == url_str)
