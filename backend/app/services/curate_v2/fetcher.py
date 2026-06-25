@@ -17,12 +17,15 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from app.config import settings
+
 from .content_parser import extract_plain_text
 
 logger = logging.getLogger(__name__)
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-BASE_URL = "https://watcha.cn/api/v2"
+WATCHA_BASE = settings.WATCHA_API_BASE.rstrip("/")
+BASE_URL = f"{WATCHA_BASE}/api/v2"
 PAGE_LIMIT = 100
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
@@ -221,7 +224,7 @@ def _parse_item(raw: dict[str, Any]) -> FetchedItem | None:
         if published_at is None:
             return None
 
-        original_url = raw.get("url") or f"https://watcha.cn/discuss/{source_id}"
+        original_url = raw.get("url") or f"{WATCHA_BASE}/discuss/{source_id}"
 
         product_id = None
         product = raw.get("product") or raw.get("subject")
@@ -368,7 +371,7 @@ def _parse_product_no_floor(raw: dict[str, Any], window_end: datetime) -> "Fetch
             review_count=int(stats.get("review_count", 0)),
             upvotes=int(stats.get("upvotes", 0) or raw.get("upvotes", 0)),
             published_at=created,
-            original_url=f"https://watcha.cn/products/{slug}",
+            original_url=f"{WATCHA_BASE}/products/{slug}",
         )
     except (KeyError, TypeError, ValueError) as e:
         logger.debug("Failed to parse product: %s — %s", raw.get("id"), e)

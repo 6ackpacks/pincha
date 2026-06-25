@@ -63,11 +63,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             auth_header = request.headers.get("authorization", "")
             if auth_header.lower().startswith("bearer "):
                 return await call_next(request)
-            # Content-Type: application/json 会触发 CORS preflight，无法被简单表单伪造
-            content_type = request.headers.get("content-type", "")
-            if "application/json" in content_type:
-                return await call_next(request)
-            # 既无 Origin/Referer，也无 Bearer token 或 JSON content-type，拒绝请求
+            # 既无 Origin/Referer 又是 cookie 认证：无法验证请求来源，拒绝请求。
+            # 不能用 Content-Type: application/json 作为豁免依据——它不能可靠地触发
+            # CORS preflight（如 sendBeacon、部分客户端会绕过），否则保护退化为仅依赖
+            # SameSite cookie。
             logger.warning(
                 "CSRF 检查失败: 缺少 Origin/Referer 且无法验证请求来源, path=%s",
                 request.url.path,

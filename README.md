@@ -248,20 +248,48 @@ pincha/
 
 ## 认证系统说明
 
-当前版本使用观猹（Watcha）OAuth2 进行用户认证。如果你想使用其他认证方式：
+> ⚠️ **重要限制**：当前版本默认使用观猹（Watcha）OAuth2 登录。观猹是一个需要独立账号的第三方平台，**没有观猹账号的外部用户无法直接使用默认登录流程**。开源部署时，请按下面的方式接入自己的认证提供商，或在本地开发时使用 `/dev-login` 跳过登录。
 
-### 选项 1：使用观猹 OAuth
-1. 访问 [观猹开放平台](https://watcha.cn) 注册账号
-2. 创建 OAuth 应用获取 `CLIENT_ID` 和 `CLIENT_SECRET`
-3. 在 `.env` 中配置相应变量
+认证逻辑全部集中在 `backend/app/api/v1/auth.py`，登录态以 JWT 形式存入 HttpOnly Cookie（有效期 7 天）。
 
-### 选项 2：替换为其他 OAuth 提供商
-参考 `backend/app/api/v1/auth.py` 修改 OAuth 流程，支持的提供商包括：
-- GitHub OAuth
-- Google OAuth
-- 自定义 OAuth2 服务器
+### 选项 1：使用观猹 OAuth（默认）
 
-我们计划在未来版本中支持多种认证方式。欢迎贡献代码！
+1. 访问 [观猹开放平台](https://watcha.cn) 注册账号并创建 OAuth 应用
+2. 获取 `CLIENT_ID` 与 `CLIENT_SECRET`
+3. 在 `.env` 中配置：
+
+```bash
+WATCHA_CLIENT_ID=你的-client-id
+WATCHA_CLIENT_SECRET=你的-client-secret
+WATCHA_REDIRECT_URI=http://localhost:8000/api/v1/auth/callback
+```
+
+### 选项 2：替换为其他 OAuth 提供商（GitHub / Google 等）
+
+OAuth2 三步流程（授权跳转 → 回调换 token → 拉取用户信息）都在 `backend/app/api/v1/auth.py`，替换提供商需改以下几处：
+
+1. **端点常量**（文件顶部，约 33-35 行）——替换为目标提供商的地址：
+
+   ```python
+   _WATCHA_AUTH_URL     = "https://watcha.cn/oauth/authorize"      # → 例如 GitHub: https://github.com/login/oauth/authorize
+   _WATCHA_TOKEN_URL    = "https://watcha.cn/oauth/api/token"      # →           https://github.com/login/oauth/access_token
+   _WATCHA_USERINFO_URL = "https://watcha.cn/oauth/api/userinfo"   # →           https://api.github.com/user
+   ```
+
+2. **`login()`**（约 51 行）——`scope` 与授权参数按提供商要求调整。
+3. **`callback()`**（约 73 行）——这是核心：
+   - token 交换的请求体（`grant_type` / `client_id` / `client_secret` 等）按提供商文档调整；
+   - 用户信息请求的鉴权方式（观猹用 query param 传 `access_token`，多数提供商用 `Authorization: Bearer` 头）；
+   - 把返回的用户字段映射到本地 `User` 模型（关键是替换 `watcha_user_id` 这个唯一标识，以及 `nickname` / `email` / `avatar_url`）。
+4. **凭证变量**——沿用 `WATCHA_CLIENT_ID` / `WATCHA_CLIENT_SECRET` / `WATCHA_REDIRECT_URI`（见 `backend/app/config.py`），或自行新增对应的配置项。
+
+> 提示：本地服务器无法直连观猹时，可设置 `WATCHA_PROXY_URL` 走代理。
+
+### 选项 3：本地开发免登录（`/dev-login`）
+
+当 `APP_ENV=development` 时，`auth.py` 会额外注册一个 `/dev-login` 端点（约 254 行）。访问 `http://localhost:8000/api/v1/auth/dev-login` 会自动以首个用户登录（不存在则创建一个开发用户并签发 Cookie），无需任何 OAuth 配置。**该端点仅在开发环境启用，生产环境不会注册。**
+
+我们计划在未来版本中支持更多开箱即用的认证方式。欢迎贡献代码！
 
 ## License
 

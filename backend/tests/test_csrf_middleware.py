@@ -98,19 +98,23 @@ class TestCSRFMiddleware:
         assert resp.json() == {"ok": True}
 
     @pytest.mark.asyncio
-    async def test_post_with_json_content_type_passes(self, csrf_client):
-        """POST without Origin/Referer but with application/json content-type passes."""
+    async def test_post_with_json_content_type_no_origin_returns_403(self, csrf_client):
+        """POST without Origin/Referer is rejected even with application/json content-type.
+
+        application/json must not be treated as a CSRF exemption — it does not
+        reliably trigger a CORS preflight (e.g. sendBeacon / some clients), so
+        trusting it would degrade protection to SameSite cookies alone.
+        """
         resp = await csrf_client.post(
             "/test",
             headers={"Content-Type": "application/json"},
             content="{}",
         )
-        assert resp.status_code == 200
-        assert resp.json() == {"ok": True}
+        assert resp.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_post_without_origin_referer_bearer_json_returns_403(self, csrf_client):
-        """POST without Origin/Referer and no Bearer/JSON content-type should be 403."""
+    async def test_post_without_origin_referer_bearer_returns_403(self, csrf_client):
+        """POST without Origin/Referer and no Bearer token should be 403 (cookie auth)."""
         resp = await csrf_client.post(
             "/test",
             headers={"Content-Type": "application/x-www-form-urlencoded"},

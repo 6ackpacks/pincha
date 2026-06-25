@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     WATCHA_CLIENT_SECRET: str = ""
     WATCHA_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/callback"
     WATCHA_PROXY_URL: str = ""  # e.g. "http://host:port" if server can't reach watcha.cn directly
+    WATCHA_API_BASE: str = "https://watcha.cn"  # content/product proxy base; override to swap providers
 
     # JWT 密钥（生产环境必须使用至少 32 字符的随机字符串）
     # 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"

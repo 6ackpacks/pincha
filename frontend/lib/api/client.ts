@@ -105,6 +105,24 @@ export function subscribeProgress(
   return cleanup;
 }
 
+// Guard against multiple concurrent 401s all triggering a redirect.
+let redirectingToLogin = false;
+
+/**
+ * Redirect to the login page on an unrecoverable 401.
+ *
+ * The session JWT cannot be refreshed — the only way to obtain a new token is
+ * to re-run the Watcha OAuth flow via /login — so an expired/invalid session
+ * means the user must log in again. The auth cookie is HttpOnly, so there is
+ * nothing to clear client-side; the backend issues a fresh cookie on callback.
+ */
+function redirectToLogin(): void {
+  if (typeof window === "undefined" || redirectingToLogin) return;
+  if (window.location.pathname.startsWith("/login")) return;
+  redirectingToLogin = true;
+  window.location.href = "/login";
+}
+
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -121,6 +139,9 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      redirectToLogin();
+    }
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed: ${res.status}`);
   }

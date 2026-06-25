@@ -5,12 +5,14 @@
 import uuid
 from datetime import date, datetime, timezone
 from typing import List
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.auth import get_current_kb_id, get_current_user
 from app.core.database import get_session
 from app.models.curate_v2 import (
@@ -534,7 +536,9 @@ async def get_product_detail(
 
     async with httpx.AsyncClient(timeout=15) as client:
         # Fetch product detail
-        resp = await client.get(f"https://watcha.cn/api/v2/products/{slug}")
+        resp = await client.get(
+            f"{settings.WATCHA_API_BASE}/api/v2/products/{quote(slug, safe='')}"
+        )
         if resp.status_code != 200:
             raise HTTPException(status_code=404, detail="产品不存在")
         data = resp.json()
@@ -602,7 +606,7 @@ async def get_product_reviews(
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"https://watcha.cn/api/v2/products/{product_id}/reviews",
+            f"{settings.WATCHA_API_BASE}/api/v2/products/{product_id}/reviews",
             params={"order_by": "hot", "limit": limit, "skip": skip},
         )
         if resp.status_code != 200:
