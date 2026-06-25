@@ -179,8 +179,9 @@ celery_{fast,pipeline,cron,curate,beat} → db + redis + bgutil-provider
 ### 1. 后端异步护栏
 
 - FastAPI 路由**必须** async，使用 `async with get_session()` 获取数据库会话
-- Celery 任务**必须**同步，使用 `tasks/shared.py` 中的同步 DB/Redis 客户端
-- **禁止**在 Celery 任务中使用 `asyncio.run()` 或 `await`
+- Celery 任务函数**必须**定义为同步（`def`，不是 `async def`），**禁止**在任务顶层 `await`
+- Celery 任务内部用 `asyncio.run()` 桥接到 async 服务层（LiteLLM、SQLAlchemy async）——这是既定模式，因为核心服务层只有 async 实现。每次 `asyncio.run()` 创建全新事件循环，**禁止**嵌套调用或使用 `asyncio.get_event_loop()`
+- 简单操作（状态更新、heartbeat 写入）用 `tasks/shared.py` 的同步 DB/Redis 客户端；需要 async DB 操作时通过 `asyncio.run()` 调用 `task_session()`
 - **禁止**在 FastAPI 路由中使用同步阻塞调用（会阻塞事件循环）
 - 长时间任务**必须**通过 Celery 队列分发，不在请求中同步执行
 

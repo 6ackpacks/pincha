@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import DOMPurify from "isomorphic-dompurify";
 
 interface ProseMirrorNode {
   type: string;
@@ -45,7 +46,7 @@ export function ProseMirrorRenderer({ content, className }: Props) {
   return (
     <article
       className={`pm-content ${className ?? ""}`}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
     />
   );
 }

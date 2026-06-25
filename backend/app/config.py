@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     TRANSCRIPTAPI_API_KEY: str = ""
     TRANSCRIPTHQ_API_KEY: str = ""
     CELERY_BROKER_URL: str = "redis://redis:6379/1"
-    SUMMARY_MODEL: str = "openai/glm-4.7"
-    FAST_SUMMARY_MODEL: str = "openai/glm-4.7"   # fast pipeline: express + highlight + full
-    DEEP_SUMMARY_MODEL: str = "openai/glm-5.1"   # deep pipeline: detailed (background)
+    SUMMARY_MODEL: str = "openai/deepseek-v4-flash"
+    FAST_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # fast pipeline: express + highlight + full
+    DEEP_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # deep pipeline: detailed (background)
     SUMMARY_API_BASE: str = ""
     YOUTUBE_COOKIES_PATH: str = "/app/cookies/cookies.txt"
     EMBEDDING_MODEL: str = "openai/text-embedding-v3"
@@ -45,9 +45,7 @@ class Settings(BaseSettings):
     TIKHUB_API_KEY: str = ""
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     WIKI_ARTICLE_LIMIT: int = 20
-    WIKI_COMPILER_MODEL: str = "openai/glm-5.1"
-    # Phase 0 single-user bypass: fixed user UUID used when no auth
-    ADMIN_USER_ID: str = "00000000-0000-0000-0000-000000000001"
+    WIKI_COMPILER_MODEL: str = "openai/deepseek-v4-flash"
     ADMIN_TOKEN: str = ""
 
     # 讯飞语音识别（录音文件转写大模型）
