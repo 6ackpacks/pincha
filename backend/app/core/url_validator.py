@@ -195,18 +195,101 @@ async def _async_redirect_event_hook(request: httpx.Request) -> None:
         raise SSRFError(f"Redirect blocked: {e}") from e
 
 
-def safe_async_client(**kwargs) -> httpx.AsyncClient:
-    """Create an httpx.AsyncClient with SSRF redirect validation.
+class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
+    """httpx transport that pins each connection to a freshly-validated public IP.
 
-    All keyword arguments are passed through to httpx.AsyncClient.
-    The event_hooks for 'request' will include async redirect validation.
+    This closes the DNS-rebinding / TOCTOU gap: validate_url_async resolves and
+    checks DNS, but the connect-time resolution happens independently and could
+    return a different (internal) IP. Here we resolve once, validate, then connect
+    to that exact IP — so validation and connection share a single resolution.
+
+    The original hostname is preserved in the Host header (virtual hosting) and in
+    the TLS sni_hostname extension (SNI + certificate verification), so pinning the
+    URL host to the literal IP does not break HTTPS.
+    """
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        hostname = request.url.host
+        if not hostname:
+            raise SSRFError("Request has no hostname")
+
+        # If the host is already an IP literal, validate it directly — no rebinding
+        # is possible and no SNI rewrite is needed.
+        try:
+            ipaddress.ip_address(hostname)
+            is_ip_literal = True
+        except ValueError:
+            is_ip_literal = False
+
+        if is_ip_literal:
+            if _is_private_ip(hostname):
+                raise SSRFError(f"IP address '{hostname}' is in a private/reserved range")
+            return await super().handle_async_request(request)
+
+        # Resolve and validate, then pin to the first public IP we find.
+        try:
+            addrinfos = await asyncio.to_thread(
+                socket.getaddrinfo,
+                hostname,
+                request.url.port,
+                socket.AF_UNSPEC,
+                socket.SOCK_STREAM,
+            )
+        except socket.gaierror:
+            raise SSRFError(f"Cannot resolve hostname '{hostname}'")
+
+        if not addrinfos:
+            raise SSRFError(f"No DNS records found for '{hostname}'")
+
+        safe_ip = None
+        for _family, _type, _proto, _canonname, sockaddr in addrinfos:
+            ip_str = sockaddr[0]
+            if _is_private_ip(ip_str):
+                # Any private IP in the record set is treated as hostile (the
+                # attacker may be racing public/private answers).
+                raise SSRFError(
+                    f"Hostname '{hostname}' resolves to private IP '{ip_str}'"
+                )
+            if safe_ip is None:
+                safe_ip = ip_str
+
+        if safe_ip is None:
+            raise SSRFError(f"No usable IP for '{hostname}'")
+
+        # Pin the socket target to the validated IP while keeping the original
+        # hostname for HTTP routing (Host header, already set by httpx) and for
+        # TLS (sni_hostname extension → server_hostname in httpcore).
+        request.url = request.url.copy_with(host=safe_ip)
+        request.extensions = dict(request.extensions)
+        request.extensions["sni_hostname"] = hostname
+
+        return await super().handle_async_request(request)
+
+
+def safe_async_client(**kwargs) -> httpx.AsyncClient:
+    """Create an httpx.AsyncClient with SSRF protection.
+
+    Provides two layers of defense:
+    - A request event hook that re-validates every URL (including redirect targets)
+      against the private-network checks.
+    - A custom transport that resolves DNS once, validates the IPs, and pins the
+      connection to a validated public IP — preventing DNS-rebinding/TOCTOU where
+      the connect-time resolution differs from the validation-time resolution.
+
+    All keyword arguments are passed through to httpx.AsyncClient. A caller-supplied
+    `transport` is respected (and assumed to provide its own SSRF handling).
     """
     event_hooks = kwargs.pop("event_hooks", {})
     request_hooks = list(event_hooks.get("request", []))
     request_hooks.append(_async_redirect_event_hook)
     event_hooks["request"] = request_hooks
 
+    transport = kwargs.pop("transport", None)
+    if transport is None:
+        transport = _SSRFSafeTransport()
+
     return httpx.AsyncClient(
         event_hooks=event_hooks,
+        transport=transport,
         **kwargs,
     )
