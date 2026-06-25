@@ -14,6 +14,7 @@ import httpx
 import yt_dlp
 
 from app.config import settings
+from app.core.url_validator import SSRFError, validate_url, validate_and_resolve_sync
 from app.services.subtitle_parsers import _build_ydl_base_opts
 from app.services.subtitle_providers import _extract_youtube_video_id
 
@@ -46,8 +47,25 @@ def _download_audio_via_rapidapi(video_id: str, output_dir: str) -> str | None:
             data = resp.json()
             download_url = data.get("url")
             if download_url:
+                # SSRF 防护：校验外部 API 返回的下载 URL + DNS 绑定
+                try:
+                    _url, resolved_ips = validate_and_resolve_sync(download_url)
+                except SSRFError as e:
+                    logger.warning("[cobalt] SSRF blocked download_url for %s: %s", video_id, e)
+                    download_url = None
+
+            if download_url:
+                from urllib.parse import urlparse as _urlparse
+                _parsed = _urlparse(download_url)
+                _pinned_ip = resolved_ips[0]
+                _port = _parsed.port or (443 if _parsed.scheme == "https" else 80)
+                # 用解析后的 IP 直接连接，防止 DNS rebinding
+                pinned_url = _parsed._replace(netloc=f"{_pinned_ip}:{_port}").geturl()
                 mp3_path = os.path.join(output_dir, "audio_api.mp3")
-                with httpx.stream("GET", download_url, timeout=120, follow_redirects=True) as stream:
+                with httpx.stream(
+                    "GET", pinned_url, timeout=120, follow_redirects=True,
+                    headers={"Host": _parsed.hostname},
+                ) as stream:
                     if stream.status_code == 200:
                         with open(mp3_path, "wb") as f:
                             for chunk in stream.iter_bytes(chunk_size=65536):
@@ -84,8 +102,23 @@ def _download_audio_via_rapidapi(video_id: str, output_dir: str) -> str | None:
             logger.warning("[rapidapi-dl] No download link in response for %s", video_id)
             return None
 
+        # SSRF 防护：校验外部 API 返回的下载 URL + DNS 绑定
+        try:
+            _url, resolved_ips = validate_and_resolve_sync(download_url)
+        except SSRFError as e:
+            logger.warning("[rapidapi-dl] SSRF blocked download_url for %s: %s", video_id, e)
+            return None
+
+        from urllib.parse import urlparse as _urlparse
+        _parsed = _urlparse(download_url)
+        _pinned_ip = resolved_ips[0]
+        _port = _parsed.port or (443 if _parsed.scheme == "https" else 80)
+        pinned_url = _parsed._replace(netloc=f"{_pinned_ip}:{_port}").geturl()
         mp3_path = os.path.join(output_dir, "audio_api.mp3")
-        with httpx.stream("GET", download_url, timeout=120, follow_redirects=True) as stream:
+        with httpx.stream(
+            "GET", pinned_url, timeout=120, follow_redirects=True,
+            headers={"Host": _parsed.hostname},
+        ) as stream:
             if stream.status_code != 200:
                 logger.warning("[rapidapi-dl] Download link returned %s for %s", stream.status_code, video_id)
                 return None
@@ -261,6 +294,9 @@ def transcribe_with_volc_asr(audio_path: str) -> list[dict]:
     return segments
 
 
+MAX_WHISPER_AUDIO_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+
+
 def transcribe_with_asr(audio_path: str) -> list[dict]:
     """Transcribe audio using OpenAI Whisper API.
 
@@ -268,6 +304,13 @@ def transcribe_with_asr(audio_path: str) -> list[dict]:
     Raises exception on failure.
     """
     import openai
+
+    # 文件大小检查，防止超大音频导致 OOM
+    file_size = os.path.getsize(audio_path)
+    if file_size > MAX_WHISPER_AUDIO_FILE_SIZE:
+        raise ValueError(
+            f"音频文件过大 ({file_size // 1024 // 1024}MB)，超出 Whisper 500MB 限制"
+        )
 
     # 使用独立的 Whisper ASR endpoint，而非 LLM 摘要网关
     if not settings.WHISPER_API_BASE:

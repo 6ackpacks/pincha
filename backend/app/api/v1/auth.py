@@ -1,20 +1,22 @@
 """观猹 OAuth2 login, callback, session endpoints."""
+import json
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, quote
 
 logger = logging.getLogger(__name__)
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.auth import blacklist_token, create_session_token, get_current_user, invalidate_user_cache
+from app.core.auth import blacklist_token, create_session_token, get_current_user, invalidate_user_cache, register_session
 from app.core.database import get_session
 from app.core.rate_limit import limiter
 from app.core.redis import get_redis
@@ -202,7 +204,10 @@ async def callback(
                 await db.refresh(user)
 
         # 4. Issue our own session JWT and redirect to frontend
-        session_token = create_session_token(user.id)
+        session_token = create_session_token(user.id, request)
+        # Register session for multi-device management
+        payload = jwt.decode(session_token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+        await register_session(user.id, payload["jti"], request)
         response = RedirectResponse(url=settings.FRONTEND_URL, status_code=302)
         response.set_cookie(key="session", value=session_token, max_age=_COOKIE_MAX_AGE, **_COOKIE_KWARGS)
         return response
@@ -235,17 +240,135 @@ async def logout(response: Response, session: str | None = Cookie(default=None))
         # Blacklist the token so it cannot be reused
         await blacklist_token(session)
 
-        # Invalidate user cache (L1 + L2)
+        # Invalidate user cache (L1 + L2) and remove session from registry
         try:
             payload = jwt.decode(session, settings.JWT_SECRET_KEY, algorithms=["HS256"])
             user_id_str = payload.get("sub")
+            jti = payload.get("jti")
             if user_id_str:
                 await invalidate_user_cache(user_id_str)
+                if jti:
+                    redis = await get_redis()
+                    await redis.hdel(f"user:sessions:{user_id_str}", jti)
         except JWTError:
             pass
 
     response.delete_cookie(key="session", path="/")
     return {"message": "已退出登录"}
+
+
+@router.post("/refresh")
+@limiter.limit("10/minute")
+async def refresh_session(
+    request: Request,
+    response: Response,
+    session: str | None = Cookie(default=None),
+    user: User = Depends(get_current_user),
+):
+    """Refresh the current session — issue a new JWT and blacklist the old one."""
+    # Distributed lock to prevent concurrent refresh race condition
+    redis = await get_redis()
+    lock_key = f"auth:refresh_lock:{user.id}"
+    acquired = await redis.set(lock_key, "1", nx=True, ex=10)
+    if not acquired:
+        raise HTTPException(status_code=429, detail="刷新请求过于频繁，请稍后重试")
+
+    try:
+        # Blacklist old token
+        if session:
+            await blacklist_token(session)
+            try:
+                old_payload = jwt.decode(session, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+                old_jti = old_payload.get("jti")
+                if old_jti:
+                    await redis.hdel(f"user:sessions:{str(user.id)}", old_jti)
+            except JWTError:
+                pass
+
+        # Issue new token
+        new_token = create_session_token(user.id, request)
+        new_payload = jwt.decode(new_token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+        await register_session(user.id, new_payload["jti"], request)
+
+        response.set_cookie(key="session", value=new_token, max_age=_COOKIE_MAX_AGE, **_COOKIE_KWARGS)
+        return {"message": "会话已刷新"}
+    finally:
+        await redis.delete(lock_key)
+
+
+@router.get("/sessions")
+async def list_sessions(
+    session: str | None = Cookie(default=None),
+    user: User = Depends(get_current_user),
+):
+    """List all active sessions for the current user."""
+    redis = await get_redis()
+    key = f"user:sessions:{user.id}"
+    raw_sessions = await redis.hgetall(key)
+
+    # Get current session's jti
+    current_jti = None
+    if session:
+        try:
+            payload = jwt.decode(session, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+            current_jti = payload.get("jti")
+        except JWTError:
+            pass
+
+    sessions = []
+    for jti, data in raw_sessions.items():
+        info = json.loads(data)
+        # Check if this session has been blacklisted
+        token_hash_key = f"token:blacklist:{jti}"
+        is_active = not await redis.exists(token_hash_key)
+        if not is_active:
+            await redis.hdel(key, jti)
+            continue
+        sessions.append({
+            "jti": jti,
+            "is_current": jti == current_jti,
+            "created_at": info.get("created_at"),
+            "user_agent": info.get("ua", ""),
+            "ip": info.get("ip", ""),
+        })
+
+    sessions.sort(key=lambda s: s.get("created_at", 0), reverse=True)
+    return sessions
+
+
+@router.delete("/sessions/{jti}")
+async def revoke_session(
+    jti: str,
+    session: str | None = Cookie(default=None),
+    user: User = Depends(get_current_user),
+):
+    """Revoke a specific session by its JTI (remote logout)."""
+    redis = await get_redis()
+    key = f"user:sessions:{user.id}"
+
+    # Verify this session belongs to the user
+    raw = await redis.hget(key, jti)
+    if not raw:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    # Prevent revoking current session (use /logout for that)
+    current_jti = None
+    if session:
+        try:
+            payload = jwt.decode(session, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+            current_jti = payload.get("jti")
+        except JWTError:
+            pass
+
+    if jti == current_jti:
+        raise HTTPException(status_code=400, detail="不能远程踢出当前会话，请使用退出登录")
+
+    # Add JTI to a lightweight blacklist (we don't have the full token, use JTI-based check)
+    await redis.setex(f"session:revoked:{jti}", _TOKEN_EXPIRE_DAYS * 86400, "1")
+    await redis.hdel(key, jti)
+    await invalidate_user_cache(str(user.id))
+
+    return {"message": "已踢出该会话"}
 
 
 # ── Dev-only: bypass OAuth for local testing ─────────────────────────────────

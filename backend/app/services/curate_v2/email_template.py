@@ -29,7 +29,7 @@ def render_daily_digest_email(
         channels_picks: Mapping of channel_name -> list of pick dicts.
             Each pick dict should have: title, summary, original_url.
         unsubscribe_url: One-click unsubscribe link.
-        frontend_url: Base URL of the frontend app. Defaults to settings.FRONTEND_URL.
+        frontend_url: Base URL of the frontend app.
 
     Returns:
         Complete HTML string ready to send as email body.

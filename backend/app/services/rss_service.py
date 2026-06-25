@@ -1,10 +1,11 @@
 """RSS feed parser for podcast episode extraction."""
 import logging
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
 
-from app.core.url_validator import SSRFError, validate_url_async, safe_async_client
+from app.core.url_validator import SSRFError, validate_and_resolve, safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,17 @@ async def parse_rss_feed(url: str) -> dict:
     }
 
     try:
-        # 0. SSRF 防护：校验 URL 不指向内网
-        await validate_url_async(url)
+        # 0. SSRF 防护：校验 URL + DNS 绑定防止 rebinding
+        _validated_url, resolved_ips = await validate_and_resolve(url)
+        parsed_host = urlparse(url).hostname
 
         # 1. 用 httpx 异步下载 RSS XML（feedparser 不支持 async）
-        async with safe_async_client(timeout=15.0, follow_redirects=True) as client:
+        async with safe_async_client(
+            resolved_ips=resolved_ips,
+            _pinned_hostname=parsed_host,
+            timeout=15.0,
+            follow_redirects=True,
+        ) as client:
             resp = await client.get(url, headers={
                 "User-Agent": "Pingcha/1.0 (podcast parser)",
             })

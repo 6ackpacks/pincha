@@ -22,6 +22,7 @@ from app.tasks.shared import (
     delete_entity_heartbeat,
     pipeline_step,
     release_entity_lock,
+    run_async,
     set_entity_heartbeat,
     try_acquire_entity_lock,
 )
@@ -36,9 +37,9 @@ def _step(article_id: str, state: str, progress: int, message: str = "") -> None
 
 @celery_app.task(
     name="app.tasks.article_tasks.process_article",
-    queue="pingcha.pipeline",
     time_limit=3600,
     soft_time_limit=3540,
+    ignore_result=True,
 )
 def process_article(article_id: str) -> dict:
     """Main article processing pipeline.
@@ -56,6 +57,23 @@ def process_article(article_id: str) -> dict:
     try:
         pipeline_start = time.monotonic()
         logger.info("[article-pipeline:%s] === Started ===", article_id)
+
+        # SSRF 防护：在抓取之前同步校验 URL（双重保险）
+        from app.core.url_validator import validate_url as _validate_url_sync, SSRFError as _SSRFError
+        from app.tasks.shared import get_sync_engine
+        from sqlalchemy import text as _text
+        with get_sync_engine().connect() as _conn:
+            _url_row = _conn.execute(
+                _text("SELECT source_url FROM articles WHERE id = :aid"),
+                {"aid": article_id},
+            ).fetchone()
+        if _url_row and _url_row[0]:
+            try:
+                _validate_url_sync(_url_row[0])
+            except _SSRFError as e:
+                logger.warning("[article-pipeline:%s] SSRF blocked: %s", article_id, e)
+                _step(article_id, "failed", 0, f"URL 安全校验失败：{e}")
+                return {"article_id": article_id, "state": "failed", "reason": "ssrf_blocked"}
 
         _step(article_id, "pending", 0, "任务开始")
         _step(article_id, "fetching", 5, "正在提取文章内容...")
@@ -130,7 +148,7 @@ def process_article(article_id: str) -> dict:
 
             return fast_summaries
 
-        fast_summaries = asyncio.run(_do())
+        fast_summaries = run_async(_do())
 
         total = time.monotonic() - pipeline_start
         logger.info("[article-pipeline:%s] === Complete in %.1fs ===", article_id, total)
@@ -155,7 +173,7 @@ def process_article(article_id: str) -> dict:
 
 
 @celery_app.task(name="app.tasks.article_tasks.generate_full_article_summary", queue="pingcha",
-                 soft_time_limit=600, time_limit=660)
+                 soft_time_limit=600, time_limit=660, ignore_result=True)
 def generate_full_article_summary(article_id: str) -> dict:
     """Generate full (90%) summary on-demand."""
     async def _do():
@@ -163,5 +181,5 @@ def generate_full_article_summary(article_id: str) -> dict:
         async with task_session() as db:
             await generate_and_store_full_summary(db, aid)
 
-    asyncio.run(_do())
+    run_async(_do())
     return {"article_id": article_id, "level": "full", "state": "done"}

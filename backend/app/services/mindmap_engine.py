@@ -2,9 +2,10 @@
 
 import logging
 
-import litellm
+from app.core.llm import llm_client
 
 from app.config import settings
+from app.services.summarization_engine import wrap_user_content, _INJECTION_GUARD_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,15 @@ async def generate_mindmap_markdown(
         Markdown string suitable for markmap rendering.
     """
     effective_model = model or settings.SUMMARY_MODEL
-    response = await litellm.acompletion(
+    guarded_system = system_prompt + _INJECTION_GUARD_SUFFIX
+    content = await llm_client().complete(
         model=effective_model,
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": source_text},
+            {"role": "system", "content": guarded_system},
+            {"role": "user", "content": wrap_user_content(source_text)},
         ],
-        api_base=settings.SUMMARY_API_BASE or None,
-        api_key=settings.OPENAI_API_KEY or None,
     )
-    content = response.choices[0].message.content.strip()
+    content = content.strip()
     # Strip code fences if LLM wraps output (e.g. ```markdown ... ```)
     if content.startswith("```"):
         lines = content.splitlines()
@@ -57,4 +57,5 @@ async def generate_mindmap_markdown(
         if lines[-1].strip() == "```":
             end = len(lines) - 1
         content = "\n".join(lines[start:end]).strip()
+        del lines  # Release the split lines list immediately
     return content

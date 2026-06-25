@@ -2,11 +2,12 @@
 import hashlib
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from cachetools import TTLCache
-from fastapi import Cookie, Depends, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,8 +26,12 @@ _USER_CACHE: TTLCache = TTLCache(maxsize=200, ttl=300)
 # L2: Redis cache TTL
 _USER_REDIS_TTL = 300  # 5 min
 
+_ANON_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
 # Token blacklist key prefix
 _BLACKLIST_PREFIX = "token:blacklist:"
+# Session registry key prefix
+_SESSION_PREFIX = "user:sessions:"
 # Whitelisted fields for L2 Redis cache restoration (is_admin intentionally excluded)
 _L2_ALLOWED_FIELDS = {"id", "email", "is_active", "nickname", "avatar_url", "name", "watcha_user_id"}
 
@@ -36,13 +41,32 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_session_token(user_id: uuid.UUID) -> str:
+def create_session_token(user_id: uuid.UUID, request: Request | None = None) -> str:
+    jti = uuid.uuid4().hex
     expire = datetime.now(timezone.utc) + timedelta(days=_TOKEN_EXPIRE_DAYS)
-    return jwt.encode(
-        {"sub": str(user_id), "exp": expire, "jti": uuid.uuid4().hex},
+    token = jwt.encode(
+        {"sub": str(user_id), "exp": expire, "jti": jti},
         settings.JWT_SECRET_KEY,
         algorithm=_ALGORITHM,
     )
+    return token
+
+
+async def register_session(user_id: uuid.UUID, jti: str, request: Request | None = None) -> None:
+    """Register a new session in Redis for session listing."""
+    try:
+        redis = await get_redis()
+        session_info = {
+            "jti": jti,
+            "created_at": int(time.time()),
+            "ua": request.headers.get("user-agent", "")[:200] if request else "",
+            "ip": request.client.host if request and request.client else "",
+        }
+        key = f"{_SESSION_PREFIX}{user_id}"
+        await redis.hset(key, jti, json.dumps(session_info))
+        await redis.expire(key, _TOKEN_EXPIRE_DAYS * 86400)
+    except Exception as exc:
+        logger.debug("Failed to register session: %s", exc)
 
 
 async def blacklist_token(token: str) -> None:
@@ -84,6 +108,18 @@ async def invalidate_user_cache(user_id: str) -> None:
         logger.debug("Redis operation failed (degraded): %s", exc)
 
 
+async def _get_or_create_anon_user(db: AsyncSession) -> User:
+    result = await db.execute(select(User).where(User.id == _ANON_USER_ID))
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+    user = User(id=_ANON_USER_ID, watcha_user_id=0, nickname="访客", name="访客", avatar_url="")
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
 async def get_current_user(
     session: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_session),
@@ -105,13 +141,18 @@ async def get_current_user(
         blacklisted = await redis.get(f"{_BLACKLIST_PREFIX}{_token_hash(session)}")
         if blacklisted:
             raise exc
+        # Check JTI-based revocation (for remote session logout)
+        jti = payload.get("jti")
+        if jti:
+            revoked = await redis.get(f"session:revoked:{jti}")
+            if revoked:
+                raise exc
     except HTTPException:
         raise
-    except Exception as exc:
-        # Availability tradeoff: if Redis is down, skip blacklist check rather than
-        # blocking all authenticated requests. This means a logged-out JWT may remain
-        # usable until its natural expiry (7 days) during a Redis outage.
-        logger.debug("Redis operation failed (degraded): %s", exc)
+    except Exception:
+        # Redis unavailable — reject request to prevent blacklisted tokens from being used
+        logger.warning("Token blacklist check failed: Redis unavailable")
+        raise HTTPException(status_code=503, detail="服务暂时不可用，请稍后重试")
 
     # L1: in-process cache (TTLCache handles expiry automatically)
     cached = _USER_CACHE.get(user_id_str)

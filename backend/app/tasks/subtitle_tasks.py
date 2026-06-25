@@ -60,8 +60,10 @@ def _process_subtitles_core(video_id: str) -> dict:
             segments, source = get_transcript_segments(video_url, platform, on_progress=_progress_cb)
         except Exception as exc:
             reason = str(exc)
+            error_code = getattr(exc, "code", "SUBTITLE_FAILED")
             logger.error("[subtitle:%s] Subtitle fetch failed after %.1fs: %s", video_id, time.monotonic() - t_fetch, reason)
-            update_video_status_sync(video_id, {"state": "failed", "progress": 0, "message": f"字幕提取失败: {reason}"})
+            update_video_status_sync(video_id, {"state": "failed", "progress": 0, "message": reason, "error_code": error_code})
+            set_heartbeat(video_id, "failed", 0, reason, error_code=error_code)
             raise RuntimeError(reason)
 
         if not segments:
@@ -135,6 +137,7 @@ def _process_subtitles_core(video_id: str) -> dict:
     name="app.tasks.subtitle_tasks.process_subtitles",
     max_retries=2,
     default_retry_delay=30,
+    ignore_result=True,
 )
 def process_subtitles(video_id: str) -> dict:
     """Celery task entry point for subtitle processing."""
@@ -142,9 +145,9 @@ def process_subtitles(video_id: str) -> dict:
 
 
 def _backfill_video_meta(session: Session, video_id: str, video_url: str) -> None:
-    """Fetch title/thumbnail/duration via yt-dlp and update the video row if still missing."""
+    """Fetch title/thumbnail/duration via multiple methods (oEmbed → page scrape → yt-dlp)."""
     import re
-    import yt_dlp
+    import httpx
 
     row = session.execute(
         text("SELECT title, thumbnail_url FROM videos WHERE id = :id"),
@@ -152,38 +155,96 @@ def _backfill_video_meta(session: Session, video_id: str, video_url: str) -> Non
     ).fetchone()
     if row is None:
         return
-    # Only backfill if fields are empty
     if row[0] and row[1]:
         return
 
-    # Quick YouTube thumbnail from URL pattern (no network call needed)
+    # YouTube video ID and thumbnail from URL pattern
     thumb = None
+    video_id_yt = None
     m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", video_url)
     if m:
-        thumb = f"https://img.youtube.com/vi/{m.group(1)}/maxresdefault.jpg"
+        video_id_yt = m.group(1)
+        thumb = f"https://img.youtube.com/vi/{video_id_yt}/maxresdefault.jpg"
 
     title = None
     duration_str = None
-    try:
-        proxy = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or ""
-        ydl_opts: dict = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 15}
-        if proxy:
-            ydl_opts["proxy"] = proxy
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
-        if info:
-            title = info.get("title")
-            if not thumb:
-                thumb = info.get("thumbnail")
-            secs = info.get("duration")
-            if secs:
-                h, r = divmod(int(secs), 3600)
-                mm, ss = divmod(r, 60)
-                duration_str = f"{h:02d}:{mm:02d}:{ss:02d}"
-    except Exception as exc:
-        logger.warning("Meta backfill yt-dlp failed for %s: %s", video_id, exc)
 
-    # Whitelist of allowed columns and their values
+    # Method 1: YouTube oEmbed (fast, free, no auth)
+    if not title and video_id_yt:
+        try:
+            resp = httpx.get(
+                f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id_yt}&format=json",
+                timeout=8, follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                title = data.get("title")
+                if title:
+                    logger.info("Meta via oEmbed for %s: %s", video_id, title[:60])
+        except Exception as exc:
+            logger.debug("oEmbed failed for %s: %s", video_id, exc)
+
+    # Method 2: noembed.com fallback (third-party oEmbed proxy)
+    if not title and video_id_yt:
+        try:
+            resp = httpx.get(
+                f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={video_id_yt}",
+                timeout=8, follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                title = data.get("title")
+                if title:
+                    logger.info("Meta via noembed for %s: %s", video_id, title[:60])
+        except Exception as exc:
+            logger.debug("noembed failed for %s: %s", video_id, exc)
+
+    # Method 3: Scrape YouTube page <title> and duration
+    if not title and video_id_yt:
+        try:
+            resp = httpx.get(
+                f"https://www.youtube.com/watch?v={video_id_yt}",
+                timeout=10, follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; bot)", "Accept-Language": "en"},
+            )
+            if resp.status_code == 200:
+                m_title = re.search(r"<title>(.+?)(?:\s*-\s*YouTube)?</title>", resp.text)
+                if m_title:
+                    t = m_title.group(1).strip()
+                    if t and t != "YouTube":
+                        title = t
+                        logger.info("Meta via page scrape for %s: %s", video_id, title[:60])
+                m_dur = re.search(r'"lengthSeconds":"(\d+)"', resp.text)
+                if m_dur:
+                    secs = int(m_dur.group(1))
+                    h, r = divmod(secs, 3600)
+                    mm, ss = divmod(r, 60)
+                    duration_str = f"{h:02d}:{mm:02d}:{ss:02d}"
+        except Exception as exc:
+            logger.debug("Page scrape failed for %s: %s", video_id, exc)
+
+    # Method 4: yt-dlp fallback (slowest, may be blocked)
+    if not title:
+        try:
+            import yt_dlp
+            proxy = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTP_PROXY") or ""
+            ydl_opts: dict = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 15}
+            if proxy:
+                ydl_opts["proxy"] = proxy
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+            if info:
+                title = info.get("title")
+                if not thumb:
+                    thumb = info.get("thumbnail")
+                secs = info.get("duration")
+                if secs and not duration_str:
+                    h, r = divmod(int(secs), 3600)
+                    mm, ss = divmod(r, 60)
+                    duration_str = f"{h:02d}:{mm:02d}:{ss:02d}"
+        except Exception as exc:
+            logger.warning("Meta backfill yt-dlp failed for %s: %s", video_id, exc)
+
     column_values: dict = {}
     if title and not row[0]:
         column_values["title"] = title
@@ -195,8 +256,6 @@ def _backfill_video_meta(session: Session, video_id: str, video_url: str) -> Non
     if not column_values:
         return
 
-    # Build SET clause from whitelist only — column names are hardcoded above,
-    # never derived from external input.
     set_clause = ", ".join(f"{col} = :{col}" for col in column_values)
     column_values["id"] = video_id
 

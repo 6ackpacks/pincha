@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 
-import litellm
+import redis.asyncio as aioredis
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,12 +20,44 @@ from app.services.summarization_engine import (
     _chunk_and_merge as _engine_chunk_and_merge,
     _summarize_single as _engine_summarize_single,
     _summarize_with_chunking as _engine_summarize_with_chunking,
+    wrap_user_content,
+    _INJECTION_GUARD_SUFFIX,
+)
+from app.core.llm import llm_client
+from app.services.summary_pipeline_v2 import (
+    generate_fast_summaries_v2,
+    generate_full_clean_v2,
 )
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Hierarchical summarization thresholds
+# ---------------------------------------------------------------------------
+HIERARCHICAL_CHAR_THRESHOLD = 20_000   # Enable hierarchical when text > 20K chars
+HIERARCHICAL_SEGMENT_THRESHOLD = 300   # Enable hierarchical when segments > 300
+
 # Concurrency limiter for LLM calls to avoid upstream 429 rate-limiting.
-_llm_semaphore = asyncio.Semaphore(5)
+_llm_semaphore = asyncio.Semaphore(9)
+
+# Concurrency limiter for hierarchical group processing.
+# Limits simultaneous Redis connections + memory from concurrent LLM responses.
+_group_semaphore = asyncio.Semaphore(5)
+
+
+def _get_redis_pool() -> aioredis.Redis:
+    """Create a Redis client backed by a bounded connection pool.
+
+    This avoids creating unbounded connections when called concurrently.
+    The pool limits max connections to prevent memory/FD exhaustion on
+    small containers (e.g., Zeabur K3s 512MB-1GB pods).
+    """
+    pool = aioredis.ConnectionPool.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,
+        max_connections=10,
+    )
+    return aioredis.Redis(connection_pool=pool)
 
 # Cascade order: raw transcript → full → detailed → highlight → express
 # Each level is generated from the PREVIOUS level's output (except full, which uses raw transcript).
@@ -213,6 +245,235 @@ async def _cascade_single(input_text: str, level: SummaryLevel, model: str | Non
     )
 
 
+# ---------------------------------------------------------------------------
+# Hierarchical summarization: split long transcripts into time-based groups,
+# summarize each group concurrently, then merge into a final coherent summary.
+# ---------------------------------------------------------------------------
+
+
+def _format_time(seconds: float) -> str:
+    """Convert seconds to MM:SS or HH:MM:SS format."""
+    seconds = int(seconds)
+    if seconds >= 3600:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h}:{m:02d}:{s:02d}"
+    m = seconds // 60
+    s = seconds % 60
+    return f"{m}:{s:02d}"
+
+
+def _split_into_time_groups(
+    segments: list[dict], group_duration_seconds: int = 120
+) -> list[list[dict]]:
+    """Split subtitle segments into time-based groups of ~2 minutes each."""
+    if not segments:
+        return []
+
+    groups: list[list[dict]] = []
+    current_group: list[dict] = []
+    group_start = segments[0].get("start", 0)
+
+    for seg in segments:
+        seg_start = seg.get("start", 0)
+        if seg_start - group_start >= group_duration_seconds and current_group:
+            groups.append(current_group)
+            current_group = [seg]
+            group_start = seg_start
+        else:
+            current_group.append(seg)
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+async def _summarize_group(
+    group: list[dict], video_id: uuid.UUID, group_idx: int, total_groups: int,
+    redis_client: aioredis.Redis | None = None,
+) -> dict:
+    """Summarize a single time-based group and publish progress via Redis.
+
+    Args:
+        redis_client: Shared Redis connection (from caller). If None, creates
+            and closes its own connection (backward compat).
+    """
+    # Gate overall group concurrency to limit memory + Redis connections
+    async with _group_semaphore:
+        text = " ".join([seg.get("text", "") for seg in group])
+        start_time = group[0].get("start", 0)
+        end_time = group[-1].get("end", group[-1].get("start", 0))
+
+        system_prompt = (
+            "你是一位视频片段摘要助手。请用 2-3 句话概括以下视频片段的核心内容。\n"
+            "要求：提炼关键观点和结论，不要罗列话题。\n"
+            "输出 JSON 格式：{\"title\": \"一句话标题\", \"summary\": \"2-3句核心内容\", \"keywords\": [\"关键词1\", \"关键词2\"]}\n"
+            + _INJECTION_GUARD_SUFFIX
+        )
+
+        user_message = wrap_user_content(text[:5000])
+
+        async with _llm_semaphore:
+            content = await llm_client().complete(
+                model=settings.FAST_SUMMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                response_format={"type": "json_object"},
+            )
+
+        try:
+            result = json.loads(content) if content else {}
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("[hierarchical:%s] Group %d JSON parse failed, using fallback", video_id, group_idx + 1)
+            result = {"title": f"Segment {group_idx + 1}", "summary": content or "", "keywords": []}
+        result["start_time"] = _format_time(start_time)
+        result["end_time"] = _format_time(end_time)
+
+        # Publish progress using shared Redis connection
+        try:
+            r = redis_client or aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            await r.publish(f"video:{video_id}:summary_stream", json.dumps({
+                "type": "delta",
+                "level": "detailed",
+                "delta": f"\n\n**[{result['start_time']}-{result['end_time']}] {result.get('title', '')}**\n{result.get('summary', '')}\n",
+            }))
+        except Exception as pub_exc:
+            logger.warning("[hierarchical:%s] Failed to publish group progress: %s", video_id, pub_exc)
+        finally:
+            # Only close if we created our own connection
+            if redis_client is None and 'r' in locals():
+                await r.close()
+
+        # Release reference to text/messages to help GC in concurrent scenarios
+        del text, user_message
+
+        logger.info(
+            "[hierarchical:%s] Group %d/%d done [%s-%s]: %s",
+            video_id, group_idx + 1, total_groups,
+            result["start_time"], result["end_time"], result.get("title", ""),
+        )
+        return result
+
+
+async def _stream_final_summary(
+    merged_input: str, video_id: uuid.UUID, level: str
+) -> str:
+    """Merge group summaries into a coherent final summary with streaming output."""
+    r = _get_redis_pool()
+
+    system_prompt = (
+        "你是一位视频内容分析师。以下是视频各时间段的摘要。\n"
+        "请将它们整合为一篇连贯、结构化的详细笔记。\n"
+        "要求：\n"
+        "- 使用 ## 二级标题分区\n"
+        "- 提炼核心洞见，不要重复罗列\n"
+        "- 保持逻辑连贯，像是一篇完整的分析文章\n"
+        "- 保留关键数据和案例\n"
+        "- 无论原文语言，输出使用中文"
+        + _INJECTION_GUARD_SUFFIX
+    )
+
+    user_message = wrap_user_content(merged_input)
+
+    full_content = ""
+    try:
+        # Notify frontend that merging phase has started
+        try:
+            await r.publish(f"video:{video_id}:summary_stream", json.dumps({
+                "type": "delta",
+                "level": level,
+                "delta": "\n\n---\n\n*正在整合为完整笔记...*\n\n",
+            }))
+        except Exception:
+            pass
+
+        async with _llm_semaphore:
+            async for delta in llm_client().stream(
+                model=settings.FAST_SUMMARY_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+            ):
+                if delta:
+                    full_content += delta
+                    try:
+                        await r.publish(f"video:{video_id}:summary_stream", json.dumps({
+                            "type": "delta",
+                            "level": level,
+                            "delta": delta,
+                        }))
+                    except Exception:
+                        pass
+    finally:
+        await r.close()
+
+    return full_content
+
+
+async def _hierarchical_summarize(
+    transcript_text: str, segments: list[dict], video_id: uuid.UUID, level: str
+) -> str:
+    """Hierarchical summarization: group by time, summarize concurrently, merge with streaming.
+
+    Strategy:
+    1. Split segments into ~2-minute time groups
+    2. Concurrently summarize each group (publishes incremental progress)
+       - Concurrency limited by _group_semaphore (max 5 simultaneous)
+       - Single shared Redis connection for all group progress publishing
+    3. Stream-merge all group summaries into a coherent final summary
+
+    This reduces total latency from 4-5 min to 30-60 sec for long transcripts
+    because group summaries run in parallel and each is small enough to be fast.
+    """
+    t0 = time.monotonic()
+
+    # Step 1: Split into time-based groups
+    groups = _split_into_time_groups(segments, group_duration_seconds=120)
+    logger.info(
+        "[hierarchical:%s] Starting: %d chars, %d segments -> %d groups",
+        video_id, len(transcript_text), len(segments), len(groups),
+    )
+
+    # Step 2: Summarize all groups with bounded concurrency and shared Redis
+    # Use a single pooled Redis connection for all group progress publishing
+    shared_redis = _get_redis_pool()
+    try:
+        group_summaries = await asyncio.gather(*[
+            _summarize_group(group, video_id, group_idx, len(groups), redis_client=shared_redis)
+            for group_idx, group in enumerate(groups)
+        ])
+    finally:
+        await shared_redis.close()
+
+    # Step 3: Build merged input from all group summaries
+    merged_input = "\n\n".join([
+        f"[{gs['start_time']}-{gs['end_time']}] {gs.get('title', '')}\n{gs.get('summary', '')}"
+        for gs in group_summaries
+    ])
+
+    # Release reference to large data structures before final merge
+    del group_summaries
+
+    logger.info(
+        "[hierarchical:%s] Group phase done in %.1fs, merging",
+        video_id, time.monotonic() - t0,
+    )
+
+    # Step 4: Stream-generate the final coherent summary
+    final_summary = await _stream_final_summary(merged_input, video_id, level)
+
+    logger.info(
+        "[hierarchical:%s] Complete in %.1fs, output %d chars",
+        video_id, time.monotonic() - t0, len(final_summary),
+    )
+    return final_summary
+
+
 async def generate_all_summaries(transcript_text: str) -> dict[str, str]:
     """Generate all 4 summary levels in cascade order.
 
@@ -323,101 +584,111 @@ FAST_CASCADE_ORDER: list[SummaryLevel] = ["detailed", "highlight", "express"]
 
 
 async def _publish_summary_event(video_id: uuid.UUID, event_type: str, data: dict) -> None:
-    """Publish a summary event to Redis Pub/Sub for SSE subscribers."""
-    from app.core.redis import get_redis
-    redis = await get_redis()
-    payload = json.dumps({"type": event_type, **data})
-    await redis.publish(f"video:{video_id}:summary_stream", payload)
+    """Publish a summary event to Redis Pub/Sub for SSE subscribers.
+
+    Uses a pooled Redis connection with bounded max_connections to avoid
+    connection leaks when called from Celery tasks via asyncio.run().
+    """
+    redis = _get_redis_pool()
+    try:
+        payload = json.dumps({"type": event_type, **data})
+        await redis.publish(f"video:{video_id}:summary_stream", payload)
+    finally:
+        await redis.close()
 
 
 async def _stream_cascade_single(
     input_text: str, level: str, video_id: uuid.UUID, model: str | None = None
 ) -> str:
-    """Generate one cascade level with streaming, publishing tokens to Redis in real-time."""
-    from app.core.redis import get_redis
+    """Generate one cascade level with streaming, publishing tokens to Redis in real-time.
 
-    # For detailed level with short-enough text, use streaming
-    if level == "detailed" and len(input_text) <= CHUNK_CHAR_THRESHOLD:
-        redis = await get_redis()
-        channel = f"video:{video_id}:summary_stream"
-        system_prompt = CASCADE_PROMPTS[level]
+    Uses a pooled Redis connection to avoid connection leaks when called
+    from Celery tasks via asyncio.run() (which creates a new loop).
+    """
 
-        full_content = ""
-        async with _llm_semaphore:
-            response = await litellm.acompletion(
-                model=model or settings.FAST_SUMMARY_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": input_text},
-                ],
-                stream=True,
-                timeout=180,
-                num_retries=2,
-                api_base=settings.SUMMARY_API_BASE or None,
-                api_key=settings.OPENAI_API_KEY or None,
-            )
-            async for chunk in response:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    full_content += delta
-                    await redis.publish(channel, json.dumps({
-                        "type": "delta", "level": level, "delta": delta,
-                    }))
-        return full_content
+    if len(input_text) <= CHUNK_CHAR_THRESHOLD:
+        redis = _get_redis_pool()
+        try:
+            channel = f"video:{video_id}:summary_stream"
+            system_prompt = CASCADE_PROMPTS[level] + _INJECTION_GUARD_SUFFIX
 
-    # Fallback to non-streaming for chunked text or non-detailed levels
+            full_content = ""
+            async with _llm_semaphore:
+                async for delta in llm_client().stream(
+                    model=model or settings.FAST_SUMMARY_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": wrap_user_content(input_text)},
+                    ],
+                ):
+                    if delta:
+                        full_content += delta
+                        try:
+                            await redis.publish(channel, json.dumps({
+                                "type": "delta", "level": level, "delta": delta,
+                            }))
+                        except Exception:
+                            pass
+            return full_content
+        finally:
+            await redis.close()
+
+    # Fallback to non-streaming for chunked text
     return await _cascade_single(input_text, level, model=model)
+
+
+async def _fetch_transcript_segments(db: AsyncSession, video_id: uuid.UUID) -> list[dict]:
+    """Fetch the segments JSONB column for a video's transcript."""
+    result = await db.execute(
+        select(Transcript.segments).where(Transcript.video_id == video_id)
+    )
+    segments = result.scalar_one_or_none()
+    return segments or []
+
+
+def _should_use_hierarchical(transcript_text: str, segments: list[dict]) -> bool:
+    """Determine whether hierarchical summarization should be used."""
+    return (
+        len(transcript_text) > HIERARCHICAL_CHAR_THRESHOLD
+        or len(segments) > HIERARCHICAL_SEGMENT_THRESHOLD
+    )
 
 
 async def generate_and_store_fast_summaries(
     db: AsyncSession, video_id: uuid.UUID
 ) -> list[Summary]:
-    """Generate detailed + highlight + express with progressive storage.
+    """Generate detailed + highlight + express via v2 pipeline (parallel).
 
-    Cascade: raw transcript -> detailed(60%) -> highlight(30%) -> express(5%)
-    Each level is stored immediately after generation and a level_ready event
-    is published so the frontend can display content progressively.
-    The detailed level streams tokens in real-time via Redis Pub/Sub.
+    New flow: split → parallel chunk summaries → parallel 3-level merge.
     """
     transcript_text = await _fetch_transcript_text(db, video_id)
-
-    results: dict[str, str] = {}
-    current_input = transcript_text
     source_len = len(transcript_text)
 
+    # Authoritative generation_id for this round — threaded through every
+    # published event so the frontend can discard stale-round deltas.
+    generation_id = str(uuid.uuid4())
+
     logger.info(
-        "[summary:%s] Fast cascade start: raw transcript %d chars | levels: %s",
-        video_id, source_len,
-        " -> ".join(FAST_CASCADE_ORDER),
+        "[summary:%s] V2 pipeline start: %d chars, generation_id=%s",
+        video_id, source_len, generation_id,
     )
-    t_cascade = time.monotonic()
+    t_start = time.monotonic()
 
-    for level in FAST_CASCADE_ORDER:
-        input_len = len(current_input)
-        t_level = time.monotonic()
-        logger.info(
-            "[summary:%s] Cascade [%s]: input %d chars (%.0f%% of source)",
-            video_id, level, input_len, input_len / source_len * 100,
-        )
+    # Use the new v2 pipeline
+    from app.services.summary_pipeline_v2 import publish_fail_count_var
+    results = await generate_fast_summaries_v2(
+        transcript_text, semaphore=_llm_semaphore,
+        video_id=video_id, generation_id=generation_id,
+    )
 
-        # Use streaming for detailed level
-        if level == "detailed":
-            content = await _stream_cascade_single(
-                current_input, level, video_id, model=settings.FAST_SUMMARY_MODEL
-            )
-        else:
-            content = await _cascade_single(current_input, level, model=settings.FAST_SUMMARY_MODEL)
+    logger.info(
+        "[summary:%s] V2 pipeline complete in %.1fs: %s",
+        video_id, time.monotonic() - t_start,
+        {k: len(v) for k, v in results.items()},
+    )
 
-        output_len = len(content)
-        logger.info(
-            "[summary:%s] Cascade [%s]: output %d chars (%.0f%% of input) in %.1fs",
-            video_id, level, output_len, output_len / input_len * 100 if input_len else 0,
-            time.monotonic() - t_level,
-        )
-        results[level] = content
-        current_input = content
-
-        # Store immediately after each level completes
+    # Store all levels
+    for level, content in results.items():
         stmt = (
             pg_insert(Summary)
             .values(
@@ -433,14 +704,20 @@ async def generate_and_store_fast_summaries(
         )
         await db.execute(stmt)
         await db.commit()
-
-        # Publish level_ready event so frontend knows this level is available
         await _publish_summary_event(video_id, "level_ready", {"level": level})
 
-    logger.info("[summary:%s] Full cascade took %.1fs", video_id, time.monotonic() - t_cascade)
-
-    # Publish stream complete
     await _publish_summary_event(video_id, "done", {"levels": list(results.keys())})
+
+    # Reconciliation: summary is persisted above, but some delta publishes may
+    # have failed mid-stream. Warn so a "successful" task with a silent stream
+    # gap is visible in logs.
+    fail_count = publish_fail_count_var.get()
+    if fail_count > 0:
+        logger.warning(
+            "[summary:%s] persisted OK but generation_id=%s had publish_fail_count=%d "
+            "delta publish failures — frontend may rely on snapshot/poll fallback",
+            video_id, generation_id, fail_count,
+        )
 
     result = await db.execute(
         select(Summary).where(
@@ -454,11 +731,13 @@ async def generate_and_store_fast_summaries(
 async def generate_and_store_full_summary(
     db: AsyncSession, video_id: uuid.UUID
 ) -> Summary:
-    """Generate full (90%) summary on-demand. Uses DEEP_SUMMARY_MODEL."""
+    """Generate full (cleaned transcript) on-demand via v2 pipeline."""
     transcript_text = await _fetch_transcript_text(db, video_id)
     t0 = time.monotonic()
     logger.info("[summary:%s] On-demand full generation start: %d chars", video_id, len(transcript_text))
-    content = await _cascade_single(transcript_text, "full", model=settings.DEEP_SUMMARY_MODEL)
+
+    content = await generate_full_clean_v2(transcript_text, semaphore=_llm_semaphore, video_id=video_id)
+
     logger.info("[summary:%s] On-demand full generation complete in %.1fs", video_id, time.monotonic() - t0)
     stmt = (
         pg_insert(Summary)
@@ -560,22 +839,15 @@ async def stream_generate_summary(transcript_text: str, level: SummaryLevel):
         yield content
         return
 
-    system_prompt = LEVEL_PROMPTS[level]
+    system_prompt = LEVEL_PROMPTS[level] + _INJECTION_GUARD_SUFFIX
     async with _llm_semaphore:
-        response = await litellm.acompletion(
+        async for delta in llm_client().stream(
             model=settings.SUMMARY_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": transcript_text},
+                {"role": "user", "content": wrap_user_content(transcript_text)},
             ],
-            stream=True,
-            timeout=180,
-            num_retries=2,
-            api_base=settings.SUMMARY_API_BASE or None,
-            api_key=settings.OPENAI_API_KEY or None,
-        )
-        async for chunk in response:
-            delta = chunk.choices[0].delta.content or ""
+        ):
             if delta:
                 yield delta
 

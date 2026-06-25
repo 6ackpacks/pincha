@@ -105,7 +105,7 @@ async def create_article(
     from app.tasks.wiki_tasks import ingest_article
     ingest_article.apply_async(
         args=[str(article.id), str(user_id), str(kb_id)],
-        queue="pingcha.pipeline",
+        queue="pingcha.llm",
     )
 
     return ArticleSummary(

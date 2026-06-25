@@ -9,8 +9,12 @@ Usage:
     # Async validation (FastAPI endpoints — non-blocking DNS resolution)
     await validate_url_async(user_supplied_url)
 
+    # Validate + resolve (prevents DNS rebinding — use before HTTP fetch)
+    url, resolved_ips = await validate_and_resolve(user_supplied_url)
+
     # Or use the safe client factory (validates on redirects too)
-    async with safe_async_client() as client:
+    # With DNS pinning (recommended for user-supplied URLs):
+    async with safe_async_client(resolved_ips=resolved_ips) as client:
         resp = await client.get(user_supplied_url)
 """
 
@@ -27,8 +31,7 @@ logger = logging.getLogger(__name__)
 # SSRF 防护：仅允许标准 HTTP/HTTPS 端口
 ALLOWED_PORTS = {80, 443}
 
-# Internal hostnames that should never be reached from user-supplied URLs.
-# Covers common PaaS/cloud internal hostnames and cloud metadata endpoints.
+# Internal hostnames that should never be reached from user-supplied URLs
 _BLOCKED_HOSTNAME_PATTERNS = (
     "service-",
     ".zeabur.internal",
@@ -186,6 +189,170 @@ async def validate_url_async(url: str) -> None:
             )
 
 
+async def validate_and_resolve(url: str) -> tuple[str, list[str]]:
+    """Validate URL safety AND return resolved IPs — prevents DNS rebinding.
+
+    Use this before making HTTP requests to user-supplied URLs. The returned
+    IPs should be passed to safe_async_client(resolved_ips=...) to pin DNS.
+
+    Returns:
+        Tuple of (validated_url, list_of_safe_ips)
+
+    Raises:
+        SSRFError: If the URL targets a private/internal network.
+    """
+    parsed = urlparse(url)
+
+    # 1. Scheme check
+    if parsed.scheme not in ("http", "https"):
+        raise SSRFError(f"URL scheme '{parsed.scheme}' is not allowed; only http/https permitted")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError("URL has no hostname")
+
+    # 2. Check for blocked internal hostnames
+    if _check_hostname_blocked(hostname):
+        raise SSRFError(f"Hostname '{hostname}' is blocked (internal service)")
+
+    # 2.5. Port whitelist
+    parsed_port = parsed.port
+    if parsed_port is None:
+        parsed_port = 443 if parsed.scheme == "https" else 80
+    if parsed_port not in ALLOWED_PORTS:
+        raise SSRFError(f"Port {parsed_port} not allowed (only 80/443)")
+
+    # 3. Check if hostname is an IP literal
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        addr = None
+
+    if addr is not None:
+        if _is_private_ip(str(addr)):
+            raise SSRFError(f"IP address '{hostname}' is in a private/reserved range")
+        return url, [str(addr)]
+
+    # 4. DNS resolution in thread pool
+    try:
+        addrinfos = await asyncio.to_thread(
+            socket.getaddrinfo, hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM
+        )
+    except socket.gaierror:
+        raise SSRFError(f"Cannot resolve hostname '{hostname}'")
+
+    if not addrinfos:
+        raise SSRFError(f"No DNS records found for '{hostname}'")
+
+    safe_ips: list[str] = []
+    for family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip_str = sockaddr[0]
+        if _is_private_ip(ip_str):
+            raise SSRFError(
+                f"Hostname '{hostname}' resolves to private IP '{ip_str}'"
+            )
+        if ip_str not in safe_ips:
+            safe_ips.append(ip_str)
+
+    return url, safe_ips
+
+
+def validate_and_resolve_sync(url: str) -> tuple[str, list[str]]:
+    """Sync version of validate_and_resolve — for Celery tasks.
+
+    Returns:
+        Tuple of (validated_url, list_of_safe_ips)
+
+    Raises:
+        SSRFError: If the URL targets a private/internal network.
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise SSRFError(f"URL scheme '{parsed.scheme}' is not allowed; only http/https permitted")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError("URL has no hostname")
+
+    if _check_hostname_blocked(hostname):
+        raise SSRFError(f"Hostname '{hostname}' is blocked (internal service)")
+
+    parsed_port = parsed.port
+    if parsed_port is None:
+        parsed_port = 443 if parsed.scheme == "https" else 80
+    if parsed_port not in ALLOWED_PORTS:
+        raise SSRFError(f"Port {parsed_port} not allowed (only 80/443)")
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        addr = None
+
+    if addr is not None:
+        if _is_private_ip(str(addr)):
+            raise SSRFError(f"IP address '{hostname}' is in a private/reserved range")
+        return url, [str(addr)]
+
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise SSRFError(f"Cannot resolve hostname '{hostname}'")
+
+    if not addrinfos:
+        raise SSRFError(f"No DNS records found for '{hostname}'")
+
+    safe_ips: list[str] = []
+    for family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip_str = sockaddr[0]
+        if _is_private_ip(ip_str):
+            raise SSRFError(
+                f"Hostname '{hostname}' resolves to private IP '{ip_str}'"
+            )
+        if ip_str not in safe_ips:
+            safe_ips.append(ip_str)
+
+    return url, safe_ips
+
+
+class _PinnedDNSTransport(httpx.AsyncHTTPTransport):
+    """Custom transport that pins DNS resolution to pre-validated IPs.
+
+    Prevents DNS rebinding attacks by replacing hostname with a safe resolved IP
+    and setting the Host header to preserve correct TLS SNI and virtual hosting.
+    """
+
+    def __init__(self, hostname_to_ips: dict[str, list[str]], **kwargs):
+        self._hostname_to_ips = hostname_to_ips
+        super().__init__(**kwargs)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        hostname = request.url.host
+        if hostname and hostname in self._hostname_to_ips:
+            ips = self._hostname_to_ips[hostname]
+            pinned_ip = ips[0]  # Use first resolved IP
+            # Replace hostname with IP in the URL
+            # Preserve port if explicitly set
+            port = request.url.port
+            if port:
+                new_url = request.url.copy_with(host=pinned_ip, port=port)
+            else:
+                new_url = request.url.copy_with(host=pinned_ip)
+            # Ensure Host header is set to original hostname for vhosts
+            request.headers["host"] = hostname
+            # Set SNI hostname for TLS certificate verification
+            extensions = dict(request.extensions) if request.extensions else {}
+            extensions["sni_hostname"] = hostname.encode("ascii")
+            request = httpx.Request(
+                method=request.method,
+                url=new_url,
+                headers=request.headers,
+                stream=request.stream,
+                extensions=extensions,
+            )
+        return await super().handle_async_request(request)
+
+
 async def _async_redirect_event_hook(request: httpx.Request) -> None:
     """Async httpx event hook that validates redirect URLs against SSRF."""
     url_str = str(request.url)
@@ -195,108 +362,41 @@ async def _async_redirect_event_hook(request: httpx.Request) -> None:
         raise SSRFError(f"Redirect blocked: {e}") from e
 
 
-class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
-    """httpx transport that pins each connection to a freshly-validated public IP.
+def safe_async_client(
+    resolved_ips: list[str] | None = None,
+    _pinned_hostname: str | None = None,
+    **kwargs,
+) -> httpx.AsyncClient:
+    """Create an httpx.AsyncClient with SSRF redirect validation.
 
-    This closes the DNS-rebinding / TOCTOU gap: validate_url_async resolves and
-    checks DNS, but the connect-time resolution happens independently and could
-    return a different (internal) IP. Here we resolve once, validate, then connect
-    to that exact IP — so validation and connection share a single resolution.
+    Args:
+        resolved_ips: Pre-resolved safe IPs from validate_and_resolve().
+            When provided along with _pinned_hostname, DNS is pinned to these
+            IPs to prevent DNS rebinding attacks.
+        _pinned_hostname: The hostname to pin. If resolved_ips is provided but
+            this is None, it will be inferred from the first request (not pinned).
+        **kwargs: Passed through to httpx.AsyncClient.
 
-    The original hostname is preserved in the Host header (virtual hosting) and in
-    the TLS sni_hostname extension (SNI + certificate verification), so pinning the
-    URL host to the literal IP does not break HTTPS.
-    """
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        hostname = request.url.host
-        if not hostname:
-            raise SSRFError("Request has no hostname")
-
-        # If the host is already an IP literal, validate it directly — no rebinding
-        # is possible and no SNI rewrite is needed.
-        try:
-            ipaddress.ip_address(hostname)
-            is_ip_literal = True
-        except ValueError:
-            is_ip_literal = False
-
-        if is_ip_literal:
-            if _is_private_ip(hostname):
-                raise SSRFError(f"IP address '{hostname}' is in a private/reserved range")
-            return await super().handle_async_request(request)
-
-        # Resolve once, validate every returned address, then pin the connection
-        # to a single validated IP.
-        try:
-            addrinfos = await asyncio.to_thread(
-                socket.getaddrinfo,
-                hostname,
-                request.url.port,
-                socket.AF_UNSPEC,
-                socket.SOCK_STREAM,
-            )
-        except socket.gaierror:
-            raise SSRFError(f"Cannot resolve hostname '{hostname}'")
-
-        if not addrinfos:
-            raise SSRFError(f"No DNS records found for '{hostname}'")
-
-        # Validate ALL addresses: any private IP in the answer set is treated as
-        # hostile (an attacker may be racing public/private answers). Pinning to a
-        # single IP loses httpx's multi-record connect fallback, so prefer IPv4 —
-        # it is broadly routable, whereas IPv6 fails on IPv4-only hosts/containers.
-        ipv4_ip = None
-        ipv6_ip = None
-        for family, _type, _proto, _canonname, sockaddr in addrinfos:
-            ip_str = sockaddr[0]
-            if _is_private_ip(ip_str):
-                raise SSRFError(
-                    f"Hostname '{hostname}' resolves to private IP '{ip_str}'"
-                )
-            if family == socket.AF_INET and ipv4_ip is None:
-                ipv4_ip = ip_str
-            elif family == socket.AF_INET6 and ipv6_ip is None:
-                ipv6_ip = ip_str
-
-        safe_ip = ipv4_ip or ipv6_ip
-        if safe_ip is None:
-            raise SSRFError(f"No usable IP for '{hostname}'")
-
-        # Pin the socket target to the validated IP while keeping the original
-        # hostname for HTTP routing (Host header, already set by httpx) and for
-        # TLS (sni_hostname extension → server_hostname in httpcore).
-        request.url = request.url.copy_with(host=safe_ip)
-        request.extensions = dict(request.extensions)
-        request.extensions["sni_hostname"] = hostname
-
-        return await super().handle_async_request(request)
-
-
-def safe_async_client(**kwargs) -> httpx.AsyncClient:
-    """Create an httpx.AsyncClient with SSRF protection.
-
-    Provides two layers of defense:
-    - A request event hook that re-validates every URL (including redirect targets)
-      against the private-network checks.
-    - A custom transport that resolves DNS once, validates the IPs, and pins the
-      connection to a validated public IP — preventing DNS-rebinding/TOCTOU where
-      the connect-time resolution differs from the validation-time resolution.
-
-    All keyword arguments are passed through to httpx.AsyncClient. A caller-supplied
-    `transport` is respected (and assumed to provide its own SSRF handling).
+    The event_hooks for 'request' will include async redirect validation.
     """
     event_hooks = kwargs.pop("event_hooks", {})
     request_hooks = list(event_hooks.get("request", []))
     request_hooks.append(_async_redirect_event_hook)
     event_hooks["request"] = request_hooks
 
-    transport = kwargs.pop("transport", None)
-    if transport is None:
-        transport = _SSRFSafeTransport()
+    # If resolved IPs are provided, use pinned DNS transport
+    if resolved_ips and _pinned_hostname:
+        transport = _PinnedDNSTransport(
+            hostname_to_ips={_pinned_hostname: resolved_ips},
+            verify=kwargs.pop("verify", True),
+        )
+        return httpx.AsyncClient(
+            event_hooks=event_hooks,
+            transport=transport,
+            **kwargs,
+        )
 
     return httpx.AsyncClient(
         event_hooks=event_hooks,
-        transport=transport,
         **kwargs,
     )

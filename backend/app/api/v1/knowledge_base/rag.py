@@ -71,8 +71,8 @@ async def ingest(
 
     try:
         result = await ingest_video(video_id, db)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="字幕不存在，无法向量化")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return IngestResponse(
         chunks_count=result["chunks_count"],
         message=f"成功向量化 {result['chunks_count']} 个文本块",
@@ -155,7 +155,7 @@ async def chat(
         finally:
             # Persist the exchange to the session if one was provided
             answer_text = "".join(collected)
-            collected.clear()  # Release references to fragment strings
+            del collected  # Release the list and all fragment string references
 
             if session_id is not None and answer_text:
                 try:

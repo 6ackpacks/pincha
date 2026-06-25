@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -11,7 +12,40 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from app.config import settings
-from app.core.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Safe async runner for Celery tasks
+# ---------------------------------------------------------------------------
+
+def run_async(coro):
+    """Safely run an async coroutine from a synchronous Celery task.
+
+    Celery workers run in threads without an active event loop, so a simple
+    asyncio.run() normally works fine.  This wrapper adds defensive handling
+    for the unlikely case where a loop is already running (e.g. gevent worker
+    or nested call).
+
+    All Celery tasks that need async should use this instead of bare
+    asyncio.run() to keep a single, auditable entry-point.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None:
+        # Normal case: no event loop in the current thread
+        return asyncio.run(coro)
+    else:
+        # Fallback: event loop exists (should not happen in prefork workers)
+        import concurrent.futures
+        logger.warning("run_async: existing event loop detected, delegating to thread pool")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
 
 # --- Sync DB engine (singleton) ---
 
@@ -105,10 +139,13 @@ HEARTBEAT_TTL = 3600  # match pipeline time_limit
 from app.core.progress import heartbeat_key  # re-export for task layer
 
 
-def set_heartbeat(video_id: str, state: str, progress: int, message: str = "") -> None:
+def set_heartbeat(video_id: str, state: str, progress: int, message: str = "", error_code: str | None = None) -> None:
     """Write heartbeat to Redis with standard payload format, and publish to SSE channel."""
     r = get_sync_redis()
-    payload = json.dumps({"state": state, "progress": progress, "message": message})
+    payload_dict = {"state": state, "progress": progress, "message": message}
+    if error_code is not None:
+        payload_dict["error_code"] = error_code
+    payload = json.dumps(payload_dict)
     # 1. 保持原有 heartbeat key（供 REST fallback 使用）
     r.setex(heartbeat_key(video_id), HEARTBEAT_TTL, payload)
     # 2. Publish 到 Pub/Sub channel（供 SSE 端点订阅）

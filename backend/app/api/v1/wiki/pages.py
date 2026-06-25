@@ -32,6 +32,7 @@ from app.core.cache import (
     wiki_pages_key,
 )
 from app.core.database import get_session
+from app.core.utils import escape_like
 from app.models.user import User
 from app.models.wiki import WikiPage, WikiRelation, WikiSource
 
@@ -94,8 +95,8 @@ async def list_wiki_pages(
     if search:
         stmt = stmt.where(
             or_(
-                WikiPage.title.ilike(f"%{search}%"),
-                WikiPage.summary.ilike(f"%{search}%"),
+                WikiPage.title.ilike(f"%{escape_like(search)}%"),
+                WikiPage.summary.ilike(f"%{escape_like(search)}%"),
             )
         )
     if tag:

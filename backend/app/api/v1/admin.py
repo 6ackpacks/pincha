@@ -1,21 +1,25 @@
 """Admin API — category/source management (ADMIN_TOKEN auth) + video management."""
 
 import asyncio
+import logging
 import os
 import secrets
 import uuid as uuid_mod
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.auth import require_admin_user
+from app.core.auth import get_current_user, require_admin_user
 from app.core.database import get_session
+from app.core.utils import escape_like
 from app.models.user import User
 from app.models.video import Video
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -25,7 +29,40 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # ---------------------------------------------------------------------------
 
 
+async def require_admin_token_or_user(
+    request: Request,
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+):
+    """Dual-mode admin auth: X-Admin-Token header OR JWT-based admin user.
+
+    If X-Admin-Token is provided and valid, allow access (with IP logging).
+    Otherwise, fall back to require_admin_user (JWT + is_admin check).
+    """
+    admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
+
+    # Path 1: Static admin token provided
+    if x_admin_token:
+        if not admin_token:
+            raise HTTPException(status_code=503, detail="Admin token is not configured")
+        if secrets.compare_digest(x_admin_token, admin_token):
+            client_ip = request.client.host if request.client else "unknown"
+            logger.info("Admin token auth from %s for %s", client_ip, request.url.path)
+            return
+        # Token provided but invalid — do not fall through, reject immediately
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+
+    # Path 2: No admin token header — require JWT admin user
+    from app.core.database import async_session
+
+    async with async_session() as db:
+        from app.core.auth import get_current_user as _get_user
+        user = await _get_user(session=request.cookies.get("session"), db=db)
+        if not user or not user.is_admin:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+
 def require_admin_token(x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")):
+    """Legacy: static token only (kept for reference, prefer require_admin_token_or_user)."""
     admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
     if not admin_token:
         raise HTTPException(status_code=503, detail="Admin token is not configured")
@@ -43,7 +80,8 @@ def require_admin_token(x_admin_token: Optional[str] = Header(None, alias="X-Adm
 # ---------------------------------------------------------------------------
 
 
-@router.post("/curate-v2/trigger", dependencies=[Depends(require_admin_user)])
+
+@router.post("/curate-v2/trigger", dependencies=[Depends(require_admin_token_or_user)])
 async def admin_trigger_curate_v2(
     target_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today Beijing time"),
 ):
@@ -51,6 +89,18 @@ async def admin_trigger_curate_v2(
     from app.tasks.curate_v2_tasks import daily_curate_pipeline
     task = daily_curate_pipeline.delay(target_date)
     return {"task_id": task.id, "target_date": target_date, "status": "queued"}
+
+
+@router.get("/task-result/{task_id}", dependencies=[Depends(require_admin_token_or_user)])
+async def admin_get_task_result(task_id: str):
+    """Query Celery task result by ID."""
+    from app.tasks.celery_app import celery_app as app
+    result = app.AsyncResult(task_id)
+    return {
+        "task_id": task_id,
+        "state": result.state,
+        "result": result.result if result.ready() else None,
+    }
 
 
 @router.post("/curate-v2/backfill", dependencies=[Depends(require_admin_user)])
@@ -164,7 +214,7 @@ async def admin_list_videos(
         from sqlalchemy import text as sa_text
         query = query.where(Video.status["state"].as_string() == status)
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{escape_like(search)}%"
         query = query.where(Video.title.ilike(pattern) | Video.url.ilike(pattern))
     query = query.order_by(Video.created_at.desc())
 
@@ -196,7 +246,7 @@ async def admin_list_videos(
 @router.post("/videos/{video_id}/retry", dependencies=[Depends(require_admin_user)])
 async def admin_retry_video(video_id: str, db: AsyncSession = Depends(get_session)):
     from uuid import UUID
-    from app.tasks.video_tasks import process_video
+    from app.services.video_service import dispatch_video_processing
 
     video = await db.get(Video, UUID(video_id))
     if not video:
@@ -205,8 +255,8 @@ async def admin_retry_video(video_id: str, db: AsyncSession = Depends(get_sessio
     video.status = {"state": "pending", "progress": 0, "message": "Retrying..."}
     await db.commit()
 
-    task = process_video.delay(video_id)
-    return {"task_id": task.id, "status": "queued"}
+    task_id = dispatch_video_processing(video_id)
+    return {"task_id": task_id, "status": "queued"}
 
 
 @router.delete("/videos/{video_id}", dependencies=[Depends(require_admin_user)])
@@ -353,10 +403,10 @@ async def admin_batch_videos(body: BatchActionBody, db: AsyncSession = Depends(g
             video.status = {"state": "failed", "progress": 0, "message": "Force failed by admin"}
             results.append({"id": vid, "ok": True})
         elif body.action == "retry":
-            from app.tasks.video_tasks import process_video
+            from app.services.video_service import dispatch_video_processing
             video.status = {"state": "pending", "progress": 0, "message": "Retrying..."}
-            task = process_video.delay(vid)
-            results.append({"id": vid, "ok": True, "task_id": task.id})
+            task_id = dispatch_video_processing(vid)
+            results.append({"id": vid, "ok": True, "task_id": task_id})
 
     await db.commit()
     return {"results": results}
@@ -374,7 +424,7 @@ async def admin_list_users(
 ):
     query = select(User)
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{escape_like(search)}%"
         query = query.where(
             User.nickname.ilike(pattern) | User.email.ilike(pattern) | User.phone.ilike(pattern)
         )

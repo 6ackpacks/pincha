@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 
-from app.core.url_validator import validate_url_async, safe_async_client, SSRFError
+from app.core.url_validator import validate_url_async, validate_and_resolve, safe_async_client, SSRFError
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +139,15 @@ async def _download_with_http(url: str) -> str:
     )
 
     try:
-        await validate_url_async(url)
-        async with safe_async_client(timeout=300, follow_redirects=True) as client:
+        from urllib.parse import urlparse as _urlparse
+        _validated_url, resolved_ips = await validate_and_resolve(url)
+        parsed_host = _urlparse(url).hostname
+        async with safe_async_client(
+            resolved_ips=resolved_ips,
+            _pinned_hostname=parsed_host,
+            timeout=300,
+            follow_redirects=True,
+        ) as client:
             async with client.stream("GET", url) as resp:
                 resp.raise_for_status()
                 bytes_written = 0

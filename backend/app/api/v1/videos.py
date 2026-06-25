@@ -16,18 +16,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
 from app.core.rate_limit import limiter
+from app.core.url_validator import validate_url_async, SSRFError
+from app.core.sse_limiter import SSEConnectionGuard, sse_concurrency_guard
 from app.core.cache import (
+    MINDMAP_TTL,
+    TRANSCRIPT_TTL,
     VIDEO_DETAIL_TTL,
     VIDEOS_LIST_TTL,
     cache_delete,
     cache_get,
     cache_set,
+    mindmap_key,
+    transcript_key,
     video_detail_key,
     videos_list_key,
 )
 from app.core.database import get_session
 from app.core.deps import require_user_video
-from app.core.url_validator import validate_url_async, SSRFError
 from app.core.redis import get_redis
 from app.config import settings
 from app.models.summary import Summary
@@ -35,6 +40,9 @@ from app.models.transcript import Transcript
 from app.models.user import User
 from app.models.video import Video
 from app.schemas.video import VideoCreate, VideoProgress, VideoResponse
+from app.schemas.transcript import TranscriptResponse
+from app.schemas.summary import SummaryResponse
+from app.schemas.mindmap import MindmapResponse
 from app.services import video_service
 from app.services.video_service import dispatch_video_processing
 from app.core.progress import heartbeat_key, sse_progress_stream
@@ -115,10 +123,14 @@ async def submit_video(
     """
     url_str = str(payload.url)
 
+    # SSRF 防护：校验用户提交的 URL 不指向内网
     try:
         await validate_url_async(url_str)
-    except SSRFError:
-        raise HTTPException(status_code=400, detail="URL 不允许：目标地址为内网或受限网络")
+    except SSRFError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"URL 不合法：{e}"},
+        )
 
     existing = (await db.execute(
         select(Video).where(Video.url == url_str)
@@ -199,8 +211,9 @@ async def pipeline_health(x_admin_token: str | None = Header(None, alias="X-Admi
     """Check if pipeline dependencies are accessible. Requires admin token."""
     admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
     if not admin_token:
-        raise HTTPException(status_code=503, detail="Admin token not configured")
-    if not x_admin_token or not _secrets.compare_digest(x_admin_token, admin_token):
+        if settings.ENVIRONMENT != "development":
+            raise HTTPException(status_code=503, detail="Admin token not configured")
+    elif not x_admin_token or not _secrets.compare_digest(x_admin_token, admin_token):
         raise HTTPException(status_code=403, detail="Invalid admin token")
     checks = {}
 
@@ -258,6 +271,84 @@ async def get_video(
     return video
 
 
+@router.get("/{video_id}/full")
+async def get_video_full(
+    video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Aggregated detail endpoint: returns video, transcript, summaries, and mindmap
+    in a single response using concurrent queries.
+
+    Each sub-query failing independently won't block the others — failed parts
+    are returned as None so the frontend can degrade gracefully.
+    """
+    # Validate ownership first (shared check, fast)
+    video = await require_user_video(db, current_user, video_id)
+
+    vid_str = str(video_id)
+
+    async def _fetch_transcript() -> dict | None:
+        key = transcript_key(vid_str)
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+        result = await db.execute(
+            select(Transcript).where(Transcript.video_id == video_id)
+        )
+        transcript = result.scalar_one_or_none()
+        if transcript is None:
+            return None
+        serialized = TranscriptResponse.model_validate(transcript).model_dump(mode="json")
+        await cache_set(key, serialized, TRANSCRIPT_TTL)
+        return serialized
+
+    async def _fetch_summaries() -> list[dict]:
+        result = await db.execute(
+            select(Summary).where(Summary.video_id == video_id)
+        )
+        summaries = result.scalars().all()
+        return [
+            SummaryResponse.model_validate(s).model_dump(mode="json")
+            for s in summaries
+        ]
+
+    async def _fetch_mindmap() -> dict | None:
+        key = mindmap_key(vid_str)
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+        from app.services.mindmap_service import get_or_create_mindmap
+        try:
+            mindmap, _ = await get_or_create_mindmap(db, video_id)
+            serialized = MindmapResponse.model_validate(mindmap).model_dump(mode="json")
+            await cache_set(key, serialized, MINDMAP_TTL)
+            return serialized
+        except Exception:
+            return None
+
+    # Concurrent fetch of all related data
+    transcript_result, summaries_result, mindmap_result = await asyncio.gather(
+        _fetch_transcript(),
+        _fetch_summaries(),
+        _fetch_mindmap(),
+        return_exceptions=True,
+    )
+
+    # Increment view count (non-blocking, fire-and-forget)
+    task = asyncio.create_task(_increment_view(video_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_log_task_exception)
+
+    return {
+        "video": VideoResponse.model_validate(video).model_dump(mode="json"),
+        "transcript": transcript_result if not isinstance(transcript_result, BaseException) else None,
+        "summaries": summaries_result if not isinstance(summaries_result, BaseException) else [],
+        "mindmap": mindmap_result if not isinstance(mindmap_result, BaseException) else None,
+    }
+
+
 @router.get("/{video_id}/progress", response_model=VideoProgress)
 async def get_video_progress(
     video_id: uuid.UUID,
@@ -286,27 +377,119 @@ async def get_video_progress(
 @router.get("/{video_id}/progress/stream")
 async def stream_video_progress(
     video_id: uuid.UUID,
+    after_seq: int = Query(0, ge=0),
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
     redis=Depends(get_redis),
+    sse_guard: SSEConnectionGuard = Depends(sse_concurrency_guard),
 ):
     """SSE endpoint: streams video processing progress via Redis Pub/Sub.
 
     Client connects once; server pushes updates as Celery publishes them.
     Automatically closes when state reaches 'done' or 'failed'.
     Falls back to last heartbeat on connect so client gets immediate state.
+
+    Summary-stream deltas are replayed from a Redis buffer on (re)connect so a
+    late / refreshing / reconnecting client does not lose previously published
+    detailed-summary tokens. Resume point is max(after_seq query param,
+    Last-Event-ID reconnect header). If the buffer has expired but the final
+    summary is already persisted, a `snapshot` event carries the DB content.
+
+    Rate limit: max 5 concurrent SSE connections per user.
     """
+    import time as _time
     from fastapi.responses import StreamingResponse as _SR
+    from app.core.database import async_session as session_factory
 
     await require_user_video(db, current_user, video_id)
 
+    vid_str = str(video_id)
+    user_id_str = str(current_user.id)
+
+    # Resume point: native EventSource resends the last `id:` as Last-Event-ID
+    # on auto-reconnect; an explicit ?after_seq also supports manual resume.
+    resume_seq = after_seq
+    if last_event_id:
+        try:
+            resume_seq = max(resume_seq, int(last_event_id))
+        except (ValueError, TypeError):
+            pass
+
+    async def _snapshot_loader() -> dict | None:
+        """Load the persisted detailed summary as a snapshot event.
+
+        Used only when the Redis buffer has expired but the run already
+        finished, so a freshly-connecting client still gets the final content
+        instead of a blank page. Uses a fresh short-lived async session.
+        """
+        try:
+            async with session_factory() as snap_db:
+                result = await snap_db.execute(
+                    select(Summary.content).where(
+                        Summary.video_id == video_id,
+                        Summary.level == "detailed",
+                    )
+                )
+                content = result.scalar_one_or_none()
+        except Exception as exc:
+            logger.warning("[sse:%s] snapshot DB query failed: %s", vid_str, exc)
+            return None
+        if not content:
+            return None
+        return {
+            "video_id": vid_str,
+            "generation_id": None,
+            "summary_level": "detailed",
+            "event_type": "snapshot",
+            "content": content,
+            "_terminal": True,
+        }
+
+    logger.info(
+        "[sse:%s] Connection opened by user=%s resume_seq=%d",
+        vid_str, user_id_str, resume_seq,
+    )
+    connect_time = _time.monotonic()
+
+    async def _monitored_stream():
+        """Wrapper around sse_progress_stream that tracks events and disconnection."""
+        event_count = 0
+        try:
+            async for chunk in sse_progress_stream(
+                "video", vid_str, redis=redis,
+                resume_seq=resume_seq, snapshot_loader=_snapshot_loader,
+            ):
+                event_count += 1
+                yield chunk
+        except asyncio.CancelledError:
+            logger.info(
+                "[sse:%s] Client disconnected (cancelled) after %.1fs, events_sent=%d",
+                vid_str, _time.monotonic() - connect_time, event_count,
+            )
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[sse:%s] Stream error after %.1fs, events_sent=%d: %s",
+                vid_str, _time.monotonic() - connect_time, event_count, exc,
+            )
+            raise
+        finally:
+            duration = _time.monotonic() - connect_time
+            logger.info(
+                "[sse:%s] Connection closed — duration=%.1fs events_sent=%d user=%s",
+                vid_str, duration, event_count, user_id_str,
+            )
+            await sse_guard.release()
+
     return _SR(
-        sse_progress_stream("video", str(video_id), redis=redis),
+        _monitored_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # 禁用 nginx/Zeabur 缓冲
             "Connection": "keep-alive",
+            "Content-Encoding": "identity",  # 阻止 GZipMiddleware 压缩 SSE 流
         },
     )
 
@@ -336,6 +519,10 @@ async def reprocess_video(
 ):
     """Re-run the processing pipeline for a video (useful for failed videos)."""
     video = await require_user_video(db, current_user, video_id)
+
+    # Invalidate subtitle cache so fresh subtitles are fetched
+    from app.services.subtitle_service import invalidate_subtitle_cache
+    invalidate_subtitle_cache(video.url, video.platform)
 
     video.status = {"state": "pending", "progress": 0, "message": "重新处理中..."}
     await db.commit()
@@ -411,12 +598,15 @@ async def ask_video(
     req: VideoAskRequest,
     db: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
+    sse_guard: SSEConnectionGuard = Depends(sse_concurrency_guard),
 ):
     """Answer a question about a video using its summary or transcript (no RAG needed).
 
     Context priority: full summary → detailed summary → transcript full_text.
     Streams the answer as SSE tokens: ``data: {"delta": "..."}`` followed by
     ``data: [DONE]``.
+
+    Rate limit: 15/minute + max 5 concurrent SSE connections per user.
     """
     import json as _json
     from app.services.video_chat_service import stream_video_answer
@@ -458,11 +648,19 @@ async def ask_video(
         async def _no_content():
             yield "data: " + _json.dumps({"delta": "视频还在处理中，字幕和总结尚未生成，请稍后再试。"}) + "\n\n"
             yield "data: [DONE]\n\n"
+        await sse_guard.release()
         return StreamingResponse(_no_content(), media_type="text/event-stream")
 
     # 3. Stream LLM response via service
+    async def _guarded_stream():
+        try:
+            async for chunk in stream_video_answer(context, req.question, context_type):
+                yield chunk
+        finally:
+            await sse_guard.release()
+
     return StreamingResponse(
-        stream_video_answer(context, req.question, context_type),
+        _guarded_stream(),
         media_type="text/event-stream",
     )
 

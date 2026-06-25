@@ -11,7 +11,6 @@ from app.core.database import get_session
 from app.core.deps import require_user_video
 from app.models.user import User
 from app.schemas.mindmap import MindmapResponse
-from app.services.mindmap_service import get_or_create_mindmap, regenerate_mindmap
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/videos/{video_id}/mindmap", tags=["mindmaps"])
@@ -34,6 +33,7 @@ async def get_mindmap(
         return cached
 
     logger.info("mindmap cache miss for %s, generating...", video_id)
+    from app.services.mindmap_service import get_or_create_mindmap
     mindmap, cached_flag = await get_or_create_mindmap(db, video_id)
     elapsed = (time.perf_counter() - t0) * 1000
     logger.info("mindmap generated for %s (%.0fms)", video_id, elapsed)
@@ -52,6 +52,7 @@ async def regenerate(
     """Force regenerate mindmap, overwriting cache."""
     await require_user_video(db, current_user, video_id)
 
+    from app.services.mindmap_service import regenerate_mindmap
     mindmap = await regenerate_mindmap(db, video_id)
     # Bust the cache
     await cache_delete(mindmap_key(str(video_id)))

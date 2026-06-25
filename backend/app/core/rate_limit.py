@@ -29,6 +29,6 @@ def _get_real_ip(request: Request) -> str:
 limiter = Limiter(
     key_func=_get_real_ip,
     default_limits=["60/minute"],
-    storage_uri=settings.REDIS_URL,  # 使用 Redis 作为分布式存储
+    storage_uri=settings.REDIS_URL,
     swallow_errors=True,
 )

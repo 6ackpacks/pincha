@@ -106,5 +106,5 @@ async def translate_transcript(
             segment_indices=body.segment_indices,
             target_lang=body.target_lang,
         )
-    except ValueError:
-        raise HTTPException(status_code=404, detail="字幕不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

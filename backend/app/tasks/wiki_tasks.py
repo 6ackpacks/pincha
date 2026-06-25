@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.cache import video_detail_key
 from app.tasks.celery_app import celery_app
-from app.tasks.shared import get_async_session, get_sync_engine, get_sync_redis
+from app.tasks.shared import get_async_session, get_sync_engine, get_sync_redis, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,10 @@ def _set_compile_progress(video_id: str, state: str, progress: int, message: str
 def _run_async(coro):
     """Run an async coroutine from a sync Celery task context.
 
-    Uses asyncio.run() which properly handles Task cancellation and
-    event loop cleanup, preventing leaked coroutines/tasks.
+    Delegates to shared.run_async for consistent event-loop handling
+    with proper Task cancellation and cleanup.
     """
-    return asyncio.run(coro)
+    return run_async(coro)
 
 
 @celery_app.task(
@@ -64,6 +64,7 @@ def _run_async(coro):
     default_retry_delay=60,
     soft_time_limit=1800,
     time_limit=1920,
+    ignore_result=True,
 )
 def compile_wiki_from_video(video_id: str, user_id: str, kb_id: str | None = None) -> dict:
     """Compile wiki pages from a video's full-level summary.
@@ -181,6 +182,7 @@ def compile_wiki_from_video(video_id: str, user_id: str, kb_id: str | None = Non
     name="app.tasks.wiki_tasks.ingest_article",
     max_retries=2,
     default_retry_delay=60,
+    ignore_result=True,
 )
 def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> dict:
     """Fetch article content (if URL) and compile into wiki.

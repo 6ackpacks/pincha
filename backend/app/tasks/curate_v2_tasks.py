@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(
     name="app.tasks.curate_v2_tasks.daily_curate_pipeline",
-    queue="pingcha.pipeline",
     soft_time_limit=1800,
     time_limit=2100,
+    ignore_result=True,
 )
 def daily_curate_pipeline(target_date: str | None = None) -> dict:
     """
@@ -38,15 +38,17 @@ def daily_curate_pipeline(target_date: str | None = None) -> dict:
         result = _run_pipeline(target_date)
         return result
     except Exception as e:
-        logger.error("Curate v2 pipeline failed: %s", e, exc_info=True)
-        return {"error": str(e)}
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("Curate v2 pipeline failed: %s\n%s", e, tb)
+        return {"error": str(e), "traceback": tb}
 
 
 @celery_app.task(
     name="app.tasks.curate_v2_tasks.send_daily_notifications",
-    queue="pingcha.pipeline",
     soft_time_limit=300,
     time_limit=360,
+    ignore_result=True,
 )
 def send_daily_notifications(target_date: str | None = None) -> dict:
     """

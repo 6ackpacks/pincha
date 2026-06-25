@@ -13,6 +13,7 @@ _env_file = _env_local if _env_local.exists() else _project_root / ".env"
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    ENVIRONMENT: str = "production"  # "development" | "production"
     APP_ENV: str = "production"  # default to production for safety
 
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@db:5432/pingcha"
@@ -20,6 +21,18 @@ class Settings(BaseSettings):
     MINIO_ENDPOINT: str = "minio:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
+
+    # 火山引擎 TOS 对象存储（图片/静态资源 CDN 加速）
+    # 留空时存储功能优雅降级：缩略图回退 /img-proxy，静态资源回退本地 public。
+    TOS_ACCESS_KEY: str = ""
+    TOS_SECRET_KEY: str = ""
+    TOS_ENDPOINT: str = ""   # 例: tos-cn-beijing.volces.com
+    TOS_REGION: str = ""     # 例: cn-beijing
+    TOS_BUCKET: str = ""     # 例: pingcha-assets
+    # CDN 加速域名（绑定到 bucket），形如 https://cdn.example.com（无尾斜杠）。
+    # 留空时回退 bucket 的 TOS 直链。
+    TOS_CDN_BASE: str = ""
+
     OPENAI_API_KEY: str = ""
     OPENAI_API_BASE: str = ""
     DASHSCOPE_API_KEY: str = ""
@@ -30,9 +43,10 @@ class Settings(BaseSettings):
     SUMMARY_MODEL: str = "openai/deepseek-v4-flash"
     FAST_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # fast pipeline: express + highlight + full
     DEEP_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # deep pipeline: detailed (background)
-    SUMMARY_API_BASE: str = ""
+    SUMMARY_API_BASE: str = "https://tokendance.space/gateway/v1"
     YOUTUBE_COOKIES_PATH: str = "/app/cookies/cookies.txt"
     EMBEDDING_MODEL: str = "openai/text-embedding-v3"
+    # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
     # Whisper ASR endpoint（语音识别，与 LLM 摘要网关分离）
     WHISPER_API_BASE: str = ""
     WHISPER_API_KEY: str = ""
@@ -45,17 +59,22 @@ class Settings(BaseSettings):
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     WIKI_ARTICLE_LIMIT: int = 20
     WIKI_COMPILER_MODEL: str = "openai/deepseek-v4-flash"
+    # Phase 0 single-user bypass: fixed user UUID used when no auth
+    ADMIN_USER_ID: str = "00000000-0000-0000-0000-000000000001"
     ADMIN_TOKEN: str = ""
 
+    # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
     # 讯飞语音识别（录音文件转写大模型）
     XFYUN_APP_ID: str = ""
     XFYUN_ACCESS_KEY_ID: str = ""
     XFYUN_API_SECRET: str = ""
 
+    # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
     # 火山引擎 ASR（录音文件识别大模型-极速版）
     VOLC_ASR_APP_ID: str = ""
     VOLC_ASR_ACCESS_TOKEN: str = ""
 
+    # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
     # RapidAPI YouTube 音频下载（yt-dlp 被封时的付费兜底）
     RAPIDAPI_KEY: str = ""
 
@@ -64,7 +83,6 @@ class Settings(BaseSettings):
     WATCHA_CLIENT_SECRET: str = ""
     WATCHA_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/callback"
     WATCHA_PROXY_URL: str = ""  # e.g. "http://host:port" if server can't reach watcha.cn directly
-    WATCHA_API_BASE: str = "https://watcha.cn"  # content/product proxy base; override to swap providers
 
     # JWT 密钥（生产环境必须使用至少 32 字符的随机字符串）
     # 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"

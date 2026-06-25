@@ -2,19 +2,20 @@
 
 
 
+import json
 import uuid
 from datetime import date, datetime, timezone
 from typing import List
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.auth import get_current_kb_id, get_current_user
 from app.core.database import get_session
+from app.core.redis import get_redis
 from app.models.curate_v2 import (
     CurateChannel,
     CurateDailyPick,
@@ -81,9 +82,40 @@ async def get_channel_picks(
     pick_date: date | None = Query(default=None, alias="date"),
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis),
 ):
     """Get picks for a channel on a specific date."""
     target_date = pick_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    cache_key = f"curate:picks:{slug}:{target_date.isoformat()}"
+
+    # Try Redis cache first
+    cached = await redis.get(cache_key)
+    if cached:
+        cached_data = json.loads(cached)
+        # Still need user-specific subscription info
+        ch_result = await db.execute(
+            select(CurateChannel).where(CurateChannel.slug == slug)
+        )
+        channel = ch_result.scalar_one_or_none()
+        if channel is None:
+            raise HTTPException(status_code=404, detail="频道不存在")
+
+        sub_result = await db.execute(
+            select(CurateSubscription).where(
+                CurateSubscription.user_id == current_user.id,
+                CurateSubscription.channel_id == channel.id,
+            )
+        )
+        sub = sub_result.scalar_one_or_none()
+        channel_resp = ChannelResponse.model_validate(channel)
+        channel_resp.is_subscribed = sub is not None
+        channel_resp.subscription_id = sub.id if sub else None
+
+        return ChannelPicksResponse(
+            channel=channel_resp,
+            picks=[DailyPickResponse.model_validate(p) for p in cached_data["picks"]],
+            pick_date=target_date,
+        )
 
     # Get channel
     ch_result = await db.execute(
@@ -103,6 +135,10 @@ async def get_channel_picks(
         .order_by(CurateDailyPick.score.desc().nulls_last())
     )
     picks = picks_result.scalars().all()
+
+    # Cache picks data (without user-specific info), TTL 2 hours
+    picks_for_cache = [DailyPickResponse.model_validate(p).model_dump(mode="json") for p in picks]
+    await redis.setex(cache_key, 7200, json.dumps({"picks": picks_for_cache}))
 
     # Check subscription
     sub_result = await db.execute(
@@ -442,10 +478,17 @@ async def deep_analyze_pick(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
     kb_id: uuid.UUID = Depends(get_current_kb_id),
+    redis: aioredis.Redis = Depends(get_redis),
 ):
     """Trigger deep analysis for a pick — creates an article and dispatches processing."""
     from app.models.article import Article
     from app.tasks.article_tasks import process_article
+
+    async def _invalidate_pick_cache(pick: CurateDailyPick) -> None:
+        """Drop the channel's cached picks so the list reflects the new article_id."""
+        ch = await db.get(CurateChannel, pick.channel_id)
+        if ch is not None:
+            await redis.delete(f"curate:picks:{ch.slug}:{pick.pick_date.isoformat()}")
 
     # Get the pick
     result = await db.execute(
@@ -489,6 +532,7 @@ async def deep_analyze_pick(
         # Link existing article back to the pick
         pick.article_id = existing_article.id
         await db.commit()
+        await _invalidate_pick_cache(pick)
         return DeepAnalyzeResponse(
             article_id=existing_article.id,
             status="exists",
@@ -512,6 +556,7 @@ async def deep_analyze_pick(
     # Link article back to the pick
     pick.article_id = article.id
     await db.commit()
+    await _invalidate_pick_cache(pick)
 
     # Dispatch processing task
     process_article.delay(str(article.id))
@@ -536,9 +581,7 @@ async def get_product_detail(
 
     async with httpx.AsyncClient(timeout=15) as client:
         # Fetch product detail
-        resp = await client.get(
-            f"{settings.WATCHA_API_BASE}/api/v2/products/{quote(slug, safe='')}"
-        )
+        resp = await client.get(f"https://watcha.cn/api/v2/products/{slug}")
         if resp.status_code != 200:
             raise HTTPException(status_code=404, detail="产品不存在")
         data = resp.json()
@@ -606,7 +649,7 @@ async def get_product_reviews(
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"{settings.WATCHA_API_BASE}/api/v2/products/{product_id}/reviews",
+            f"https://watcha.cn/api/v2/products/{product_id}/reviews",
             params={"order_by": "hot", "limit": limit, "skip": skip},
         )
         if resp.status_code != 200:

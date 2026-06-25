@@ -249,7 +249,7 @@ async def _auto_process_new_items(
 ) -> None:
     """Submit unprocessed feed items to the video analysis pipeline."""
     from app.models.video import Video
-    from app.tasks.video_tasks import process_video
+    from app.services.video_service import dispatch_video_processing
 
     result = await db.execute(
         select(FeedItem).where(
@@ -282,7 +282,7 @@ async def _auto_process_new_items(
                 item.video_id = new_video.id
                 item.processed = True
 
-                process_video.delay(str(new_video.id))
+                dispatch_video_processing(str(new_video.id))
                 logger.info(
                     "Auto-submitted video %s for feed item %s", new_video.id, item.id
                 )

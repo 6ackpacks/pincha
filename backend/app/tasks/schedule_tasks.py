@@ -14,7 +14,8 @@ from sqlalchemy import text
 ACTIVE_STATES = {"downloading", "transcribing", "summarizing"}
 
 
-@celery_app.task(name="app.tasks.schedule_tasks.check_stale_heartbeats", queue="pingcha")
+@celery_app.task(name="app.tasks.schedule_tasks.check_stale_heartbeats", queue="pingcha",
+                 ignore_result=True)
 def check_stale_heartbeats() -> dict:
     """Check for videos with active status but missing Redis heartbeat.
 

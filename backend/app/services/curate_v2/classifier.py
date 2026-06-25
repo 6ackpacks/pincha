@@ -11,9 +11,8 @@ import logging
 import re
 from typing import Any
 
-import litellm
-
 from app.config import settings
+from app.core.llm import llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ VALID_CHANNEL_SLUGS = {
 SYSTEM_ONLY_CHANNELS = {"ai-daily-brief"}
 
 
-def classify_and_summarize(title: str | None, content_text: str, source_type: str) -> dict:
+async def classify_and_summarize(title: str | None, content_text: str, source_type: str) -> dict:
     """
     Call LLM to classify content into channels and generate title/summary.
 
@@ -65,17 +64,11 @@ def classify_and_summarize(title: str | None, content_text: str, source_type: st
 {{"channels": ["slug1"], "title": "生成的标题（如原文已有标题则为null）", "summary": "一句话摘要（≤80字）"}}"""
 
     try:
-        response = litellm.completion(
-            model=settings.SUMMARY_MODEL,
+        raw = await llm_client().complete(
             messages=[{"role": "user", "content": prompt}],
-            api_base=settings.SUMMARY_API_BASE,
-            api_key=settings.OPENAI_API_KEY,
             temperature=0.1,
             max_tokens=256,
-            timeout=60,
         )
-
-        raw = response.choices[0].message.content.strip()
         result = _parse_json_response(raw)
 
         channels = result.get("channels", [])
@@ -104,7 +97,7 @@ def classify_and_summarize(title: str | None, content_text: str, source_type: st
         return _fallback_classification(title, content_text)
 
 
-def extract_daily_brief_items(content_text: str) -> list[dict]:
+async def extract_daily_brief_items(content_text: str) -> list[dict]:
     """
     Extract individual news items from the official daily brief post.
 
@@ -131,17 +124,11 @@ def extract_daily_brief_items(content_text: str) -> list[dict]:
 [{{"title": "...", "summary": "...", "url": null}}]"""
 
     try:
-        response = litellm.completion(
-            model=settings.SUMMARY_MODEL,
+        raw = await llm_client().complete(
             messages=[{"role": "user", "content": prompt}],
-            api_base=settings.SUMMARY_API_BASE,
-            api_key=settings.OPENAI_API_KEY,
             temperature=0.1,
             max_tokens=2048,
-            timeout=90,
         )
-
-        raw = response.choices[0].message.content.strip()
         items = _parse_json_response(raw)
 
         if not isinstance(items, list):

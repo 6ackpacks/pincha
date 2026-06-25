@@ -4,12 +4,12 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class ArticleCreate(BaseModel):
-    url: HttpUrl | None = None
-    content: str | None = None
+    url: HttpUrl | None = Field(default=None, max_length=2048)
+    content: str | None = Field(default=None, max_length=100000)
 
     @model_validator(mode="after")
     def check_url_or_content(self):

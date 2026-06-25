@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select, func, update, case, literal, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils import escape_like
 from app.models.video import Video
 from app.models.user_video import UserVideo
 
@@ -90,7 +91,7 @@ async def list_videos(
     )
 
     if q:
-        pattern = f"%{q}%"
+        pattern = f"%{escape_like(q)}%"
         stmt = stmt.where(
             or_(
                 Video.title.ilike(pattern),
@@ -227,10 +228,22 @@ async def increment_view_count(db: AsyncSession, video_id: uuid.UUID) -> None:
 
 
 def dispatch_video_processing(video_id: str) -> str:
-    """Dispatch video processing to Celery. Returns task ID."""
-    from app.tasks.video_tasks import process_video
-    task = process_video.delay(str(video_id))
-    return task.id
+    """Dispatch video processing to Celery. Returns task ID.
+
+    新流程：prepare → enrich → finalize 三阶段 chain，按队列隔离。
+    用 .si() 不可变签名，每阶段只吃 video_id（上游返回值不传递给下游）。
+    """
+    from celery import chain
+    from app.tasks.video_prepare_tasks import video_prepare
+    from app.tasks.video_enrich_tasks import video_enrich
+    from app.tasks.video_finalize_tasks import video_finalize
+
+    sig = chain(
+        video_prepare.si(str(video_id)),
+        video_enrich.si(str(video_id)),
+        video_finalize.si(str(video_id)),
+    )
+    return sig.apply_async().id
 
 
 def backfill_duration_from_transcript_sync(video_id: str) -> None:
@@ -274,6 +287,124 @@ def backfill_duration_from_transcript_sync(video_id: str) -> None:
         conn.execute(
             text("UPDATE videos SET duration = :dur WHERE id = :id AND (duration IS NULL OR duration = '')"),
             {"id": video_id, "dur": duration_str},
+        )
+        conn.commit()
+
+
+def fetch_and_store_thumbnail_sync(video_id: str) -> None:
+    """下载视频外部封面图并上传到火山 TOS，把 thumbnail_url 替换为 CDN 地址。
+
+    目的：让前端不再走 /img-proxy 实时回源外部图床（YouTube/B站）。
+
+    best-effort + non-fatal：任一环节失败（TOS 未配置 / 下载失败 / 上传失败 /
+    非图片内容）都保持原 thumbnail_url 不变，绝不抛异常影响视频处理管道。
+
+    幂等：thumbnail_url 已是 TOS/CDN 地址，或对象已存在时跳过下载与上传。
+
+    同步函数，供 Celery 任务（process_video，sync 上下文）直接调用。
+    """
+    import logging
+
+    from sqlalchemy import text
+
+    from app.services import storage_service
+    from app.tasks.shared import get_sync_engine
+
+    logger = logging.getLogger(__name__)
+
+    # TOS 未配置：直接降级，继续走 /img-proxy
+    if not storage_service.is_enabled():
+        return
+
+    engine = get_sync_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT thumbnail_url FROM videos WHERE id = :vid"),
+            {"vid": video_id},
+        ).fetchone()
+
+    if not row or not row[0]:
+        return  # 没有封面 URL，无可迁移
+
+    src_url = row[0]
+    if not str(src_url).startswith(("http://", "https://")):
+        return  # 非外部 URL（可能已是相对路径），跳过
+
+    key = f"thumbnails/{video_id}.jpg"
+
+    # 幂等检查：已是已迁移地址，或对象已存在 → 仅在 URL 仍指向外部时补写
+    public_url_str = storage_service.public_url(key)
+    if src_url == public_url_str:
+        return
+    if storage_service.object_exists(key):
+        _update_thumbnail_url(engine, video_id, public_url_str, src_url)
+        return
+
+    # --- 下载图片字节（参考 /img-proxy 的代理回退策略）---
+    data = _download_image_sync(src_url)
+    if data is None:
+        logger.warning("[thumbnail:%s] 封面下载失败，保留原 URL", video_id)
+        return
+
+    # --- 上传到 TOS ---
+    cdn_url = storage_service.upload_bytes(key, data, content_type="image/jpeg")
+    if not cdn_url:
+        logger.warning("[thumbnail:%s] 封面上传 TOS 失败，保留原 URL", video_id)
+        return
+
+    _update_thumbnail_url(engine, video_id, cdn_url, src_url)
+    logger.info("[thumbnail:%s] 封面已迁移到 TOS: %s", video_id, cdn_url)
+
+
+def _download_image_sync(src_url: str) -> bytes | None:
+    """同步下载图片字节，先走代理（如配置）再回退直连。失败返回 None。
+
+    校验返回内容确为图片（content-type 以 image/ 开头），否则视为失败。
+    """
+    import logging
+    import os
+
+    import httpx
+
+    logger = logging.getLogger(__name__)
+    proxy = os.environ.get("HTTP_PROXY") or os.environ.get("YOUTUBE_PROXY")
+
+    def _fetch(proxy_arg: str | None) -> bytes | None:
+        client_kwargs: dict = {"timeout": 10, "follow_redirects": True}
+        if proxy_arg:
+            # httpx>=0.28 移除了 proxies=，改用单值 proxy=（0.27 亦支持），两版本通吃
+            client_kwargs["proxy"] = proxy_arg
+        with httpx.Client(**client_kwargs) as client:
+            resp = client.get(src_url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "")
+            if not content_type.lower().startswith("image/"):
+                logger.warning("封面 content-type 非图片: %s", content_type)
+                return None
+            return resp.content
+
+    try:
+        return _fetch(proxy)
+    except Exception as exc:
+        if not proxy:
+            logger.warning("封面直连下载失败: %s", exc)
+            return None
+        # 代理失败 → 回退直连再试一次
+        try:
+            return _fetch(None)
+        except Exception as exc2:
+            logger.warning("封面下载失败（代理+直连均失败）: %s", exc2)
+            return None
+
+
+def _update_thumbnail_url(engine, video_id: str, new_url: str, old_url: str) -> None:
+    """把 videos.thumbnail_url 从外部 URL 更新为 TOS/CDN 地址（仅当仍为旧值）。"""
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        conn.execute(
+            text("UPDATE videos SET thumbnail_url = :new WHERE id = :vid AND thumbnail_url = :old"),
+            {"new": new_url, "vid": video_id, "old": old_url},
         )
         conn.commit()
 

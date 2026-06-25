@@ -33,6 +33,7 @@ from app.core.cache import (
     wiki_tags_key,
 )
 from app.core.database import get_session
+from app.core.utils import escape_like
 from app.models.user import User
 from app.models.wiki import WikiPage, WikiRelation
 
@@ -180,9 +181,9 @@ async def search_wiki(
             WikiPage.user_id == user_id,
             WikiPage.kb_id == kb_id,
             or_(
-                WikiPage.title.ilike(f"%{q}%"),
-                WikiPage.content.ilike(f"%{q}%"),
-                WikiPage.summary.ilike(f"%{q}%"),
+                WikiPage.title.ilike(f"%{escape_like(q)}%"),
+                WikiPage.content.ilike(f"%{escape_like(q)}%"),
+                WikiPage.summary.ilike(f"%{escape_like(q)}%"),
             ),
         )
         .order_by(WikiPage.updated_at.desc())
@@ -536,7 +537,7 @@ async def get_unlinked_mentions(
             WikiPage.user_id == user_id,
             WikiPage.kb_id == kb_id,
             WikiPage.id != page_id,
-            WikiPage.content.ilike(f"%{title}%"),
+            WikiPage.content.ilike(f"%{escape_like(title)}%"),
         ).limit(50)
     )
     candidates = result.scalars().all()

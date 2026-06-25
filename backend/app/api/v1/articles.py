@@ -14,6 +14,7 @@ from app.core.deps import AuthKBDeps, require_user_article
 from app.core.rate_limit import limiter
 from app.core.progress import sse_progress_stream
 from app.core.redis import get_redis
+from app.core.url_validator import validate_url_async, SSRFError
 from app.models.article import Article, ArticleSummary
 from app.schemas.article import (
     ArticleCreate,
@@ -65,6 +66,15 @@ async def submit_article(
 ):
     if payload.url:
         url_str = str(payload.url)
+
+        # SSRF 防护：校验用户提交的 URL 不指向内网
+        try:
+            await validate_url_async(url_str)
+        except SSRFError as e:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"URL 不合法：{e}"},
+            )
 
         existing = (await deps.db.execute(
             select(Article).where(
@@ -141,7 +151,7 @@ async def stream_article_progress(
     return StreamingResponse(
         sse_progress_stream("article", str(article_id), redis=redis),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no", "Connection": "keep-alive", "Content-Encoding": "identity"},
     )
 
 

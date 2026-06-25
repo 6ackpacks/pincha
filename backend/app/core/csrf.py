@@ -5,6 +5,7 @@
 """
 
 import logging
+import os
 from urllib.parse import urlparse
 
 from fastapi import Request, Response
@@ -26,6 +27,13 @@ def _get_allowed_origins() -> set[str]:
     if settings.FRONTEND_URL:
         parsed = urlparse(settings.FRONTEND_URL)
         origins.add(f"{parsed.scheme}://{parsed.netloc}")
+    # 额外允许的 origin（与 CORS 保持一致，例如 Zeabur 自动域名）
+    extra = os.environ.get("CORS_EXTRA_ORIGINS", "")
+    for o in extra.split(","):
+        o = o.strip()
+        if o:
+            parsed = urlparse(o)
+            origins.add(f"{parsed.scheme}://{parsed.netloc}")
     # 开发环境额外允许 localhost
     if settings.APP_ENV == "development":
         origins.add("http://localhost:3000")

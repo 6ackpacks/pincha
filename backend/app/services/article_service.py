@@ -3,12 +3,13 @@
 import asyncio
 import logging
 import re
+from urllib.parse import urlparse
 
 import httpx
 import trafilatura
 from trafilatura import bare_extraction
 
-from app.core.url_validator import SSRFError, validate_url_async, safe_async_client
+from app.core.url_validator import SSRFError, validate_and_resolve, safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +52,13 @@ async def extract_article(url: str, timeout: float = 20.0) -> dict:
 
     html = None
     try:
-        # SSRF 防护：校验 URL 不指向内网
-        await validate_url_async(url)
+        # SSRF 防护：校验 URL 不指向内网 + DNS 绑定防止 rebinding
+        _validated_url, resolved_ips = await validate_and_resolve(url)
+        parsed_host = urlparse(url).hostname
 
         async with safe_async_client(
+            resolved_ips=resolved_ips,
+            _pinned_hostname=parsed_host,
             timeout=timeout,
             follow_redirects=True,
             headers=_HTTP_HEADERS,
