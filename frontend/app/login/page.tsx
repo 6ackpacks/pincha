@@ -57,7 +57,7 @@ function LoginInner() {
             textDecoration: "none",
           }}
         >
-          使用品猹账号登录
+          使用观猹账号登录
         </a>
 
         {/* Dev login — only works when backend runs in development mode */}
