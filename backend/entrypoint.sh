@@ -2,8 +2,9 @@
 set -e
 
 case "${SERVICE_MODE:-web}" in
-  worker)
+  worker|worker-all)
     # Run beat in background + worker in foreground (single container)
+    # worker-all: Zeabur SERVICE_MODE value, aliased to worker for backward compat
     celery -A app.tasks.celery_app beat --loglevel=info &
     exec celery -A app.tasks.celery_app worker --loglevel=info -c 4 \
       --max-memory-per-child=400000 \
