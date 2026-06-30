@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, Suspense } from "react";
+import { useMemo, useState, useEffect, useRef, Suspense, lazy } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Clock, ShareNetwork, BookmarkSimple, CheckCircle, XCircle, CircleNotch, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, Clock, ShareNetwork, CheckCircle, XCircle, CircleNotch, Trash } from "@phosphor-icons/react";
 import { proxyThumbnail } from "@/lib/api/client";
 import { VideoPlayer } from "@/components/video/video-player";
 import { AudioPlayer } from "@/components/audio/audio-player";
@@ -18,6 +17,9 @@ import { KBSelectDialog } from "@/components/knowledge/kb-select-dialog";
 import { cn, stripMarkdown } from "@/lib/utils";
 import { STATE_LABELS } from "@/lib/constants";
 import { VideoPageSkeleton, VideoPageError, DeleteConfirmDialog, ShareCardDialog } from "./components";
+
+// framer-motion blocks ~300ms of JS parse — only needed for flying-item animation
+const FlyingItem = lazy(() => import("./flying-item").then((m) => ({ default: m.FlyingItem })));
 
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
@@ -90,23 +92,12 @@ export default function VideoAnalysisPage() {
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
 
-      {/* Flying item animation — wiki ingest */}
-      <AnimatePresence>
+      {/* Flying item animation — wiki ingest (lazy-loaded to unblock initial render) */}
+      <Suspense fallback={null}>
         {flyingItem && (
-          <motion.div
-            key={flyingItem.key}
-            initial={{ opacity: 1, y: 0, x: 0, scale: 1 }}
-            animate={{ opacity: 0, y: -80, x: 300, scale: 0.4 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
-            onAnimationComplete={() => setFlyingItem(null)}
-            className="fixed top-1/3 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/30 pointer-events-none flex items-center gap-2"
-          >
-            <BookmarkSimple size={14} weight="bold" />
-            已加入收录队列
-          </motion.div>
+          <FlyingItem keyName={flyingItem.key} onComplete={() => setFlyingItem(null)} />
         )}
-      </AnimatePresence>
+      </Suspense>
 
       {/* Top Header */}
       <header className="sticky top-0 z-50 px-6 h-[60px] flex items-center gap-4 bg-white/80 backdrop-blur-md border-b border-zinc-200">
@@ -147,7 +138,10 @@ export default function VideoAnalysisPage() {
       {isProcessing && (
         <div className="px-6 py-3 border-b border-zinc-200 bg-white shrink-0 shadow-sm flex items-center gap-4 relative z-10">
           <div className="flex-1 h-2 rounded-full bg-zinc-100 overflow-hidden">
-            <motion.div className="h-full bg-emerald-500 rounded-full" initial={{ width: 0 }} animate={{ width: `${currentProgress}%` }} transition={{ duration: 0.5, ease: "easeOut" }} />
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-[width] duration-500 ease-out"
+              style={{ width: `${currentProgress}%` }}
+            />
           </div>
           <span className="text-xs font-mono font-bold text-zinc-400 w-10 text-right">{currentProgress}%</span>
           <span className="text-xs font-bold text-emerald-600">{STATE_LABELS[currentState] || currentState}...</span>
@@ -217,7 +211,7 @@ export default function VideoAnalysisPage() {
       {/* Two-column split view */}
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative z-0">
         {/* Left column — Video + Chapter (55%) */}
-        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3 }} className="w-full lg:w-[55%] flex flex-col gap-4 p-6 overflow-y-auto">
+        <div className="w-full lg:w-[55%] flex flex-col gap-4 p-6 overflow-y-auto">
           {video?.platform === "podcast" ? (
             <div className="flex-shrink-0">
               <AudioPlayer audioUrl={video?.url || ""} thumbnailUrl={proxyThumbnail(video?.thumbnail_url)} title={video?.title} showName={video?.show_name} host={video?.host} />
@@ -265,10 +259,10 @@ export default function VideoAnalysisPage() {
               删除
             </button>
           </div>
-        </motion.div>
+        </div>
 
         {/* Right column — Tab panel (45%) */}
-        <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3, delay: 0.05 }} className="w-full lg:w-[45%] flex flex-col h-full border-l border-zinc-200 bg-white">
+        <div className="w-full lg:w-[45%] flex flex-col h-full border-l border-zinc-200 bg-white">
           <Suspense fallback={
             <div className="p-4 space-y-3 animate-pulse">
               <div className="flex gap-4 border-b pb-3">
@@ -292,7 +286,7 @@ export default function VideoAnalysisPage() {
               currentState={currentState}
             />
           </Suspense>
-        </motion.div>
+        </div>
       </main>
       </div>
 
