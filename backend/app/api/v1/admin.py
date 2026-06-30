@@ -129,7 +129,7 @@ async def admin_backfill_curate_v2(
     return {"tasks": task_ids, "total": len(task_ids)}
 
 
-@router.post("/curate-v2/notify", dependencies=[Depends(require_admin_user)])
+@router.post("/curate-v2/notify", dependencies=[Depends(require_admin_token_or_user)])
 async def admin_trigger_curate_v2_notify(
     target_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today Beijing time"),
 ):
