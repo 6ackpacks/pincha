@@ -28,6 +28,8 @@ function VideoSourceItem({ video }: { video: WikiVideoItem }) {
           <img
             src={video.thumbnail_url}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="w-10 h-6 object-cover rounded shrink-0"
           />
         ) : (

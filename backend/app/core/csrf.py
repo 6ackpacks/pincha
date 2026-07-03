@@ -27,7 +27,7 @@ def _get_allowed_origins() -> set[str]:
     if settings.FRONTEND_URL:
         parsed = urlparse(settings.FRONTEND_URL)
         origins.add(f"{parsed.scheme}://{parsed.netloc}")
-    # 额外允许的 origin（与 CORS 保持一致，例如 Zeabur 自动域名）
+    # 额外允许的 origin（与 CORS 保持一致，例如托管平台自动域名）
     extra = os.environ.get("CORS_EXTRA_ORIGINS", "")
     for o in extra.split(","):
         o = o.strip()

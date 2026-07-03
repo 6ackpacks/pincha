@@ -28,6 +28,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
         request_id_ctx.set(rid)
         request.state.request_id = rid
+        # slowapi 0.1.x may try to inject headers on routes without a concrete
+        # limit match. Pre-seed the state so those routes do not fail with 500.
+        request.state.view_rate_limit = None
 
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid

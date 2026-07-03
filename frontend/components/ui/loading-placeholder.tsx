@@ -1,5 +1,45 @@
-import { CircleNotch } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
+
+type MascotScene = "parsing" | "thinking" | "searching" | "compiling" | "empty" | "error" | "done";
+
+const MASCOT_GIF: Record<MascotScene, string> = {
+  parsing: cdnUrl("/mascot/cha_lens.gif"),
+  thinking: cdnUrl("/mascot/icon_thinking.gif"),
+  searching: cdnUrl("/mascot/loading.gif"),
+  compiling: cdnUrl("/mascot/cha_star.gif"),
+  empty: cdnUrl("/mascot/empty_state.gif"),
+  error: cdnUrl("/mascot/error.gif"),
+  done: cdnUrl("/mascot/cha_cheer.gif"),
+};
+
+const MASCOT_SIZE: Record<string, string> = {
+  sm: "w-16 h-16",
+  md: "w-24 h-24",
+  lg: "w-32 h-32",
+};
+
+interface MascotLoadingProps {
+  scene: MascotScene;
+  message?: string;
+  size?: "sm" | "md" | "lg";
+  className?: string;
+}
+
+export function MascotLoading({ scene, message, size = "md", className }: MascotLoadingProps) {
+  return (
+    <div className={cn("flex flex-col items-center justify-center gap-3 py-8", className)}>
+      <img
+        src={MASCOT_GIF[scene]}
+        alt=""
+        className={cn(MASCOT_SIZE[size], "object-contain")}
+      />
+      {message && (
+        <p className="text-sm text-zinc-400 font-medium">{message}</p>
+      )}
+    </div>
+  );
+}
 
 interface LoadingPlaceholderProps {
   message?: string;
@@ -8,10 +48,7 @@ interface LoadingPlaceholderProps {
 
 export function LoadingPlaceholder({ message = "加载中...", className }: LoadingPlaceholderProps) {
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-3 py-12", className)}>
-      <CircleNotch size={32} weight="bold" className="text-emerald-500 animate-spin" />
-      <p className="text-sm text-zinc-400 font-medium">{message}</p>
-    </div>
+    <MascotLoading scene="thinking" message={message} className={className} />
   );
 }
 

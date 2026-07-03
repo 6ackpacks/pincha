@@ -26,8 +26,12 @@ from app.tasks.shared import (
     set_entity_heartbeat,
     try_acquire_entity_lock,
 )
+from app.tasks.wiki_tasks import ingest_article
 
 logger = logging.getLogger(__name__)
+
+
+SOURCE_UNAVAILABLE_ERROR = "source_unavailable"
 
 
 def _step(article_id: str, state: str, progress: int, message: str = "") -> None:
@@ -80,6 +84,10 @@ def process_article(article_id: str) -> dict:
 
         async def _do():
             aid = uuid.UUID(article_id)
+            article_source_type: str | None = None
+            article_user_id: uuid.UUID | None = None
+            article_kb_id: uuid.UUID | None = None
+            article_in_wiki = False
 
             # Step 1: Extract article content
             async with task_session() as db:
@@ -88,7 +96,20 @@ def process_article(article_id: str) -> dict:
                 if not article:
                     raise RuntimeError(f"Article {article_id} not found")
 
+                article_source_type = article.source_type
+                article_user_id = article.user_id
+                article_kb_id = article.kb_id
+                article_in_wiki = article.in_wiki
+
                 if article.content:
+                    if article.source_type == "curate_pick":
+                        from app.services.curate_v2.content_parser import extract_plain_text
+
+                        normalized_content = extract_plain_text(article.content)
+                        if normalized_content and normalized_content != article.content:
+                            article.content = normalized_content
+                            article.word_count = len(normalized_content)
+                            await db.commit()
                     logger.info(
                         "[article-pipeline:%s] Content already provided (%s mode), skipping extraction",
                         article_id,
@@ -101,7 +122,7 @@ def process_article(article_id: str) -> dict:
                                 article_id, time.monotonic() - t0, extracted["success"])
 
                     if not extracted["success"]:
-                        raise RuntimeError(f"Failed to extract article content from {article.source_url}")
+                        raise RuntimeError(SOURCE_UNAVAILABLE_ERROR)
 
                     article.content = extracted["content"]
                     article.title = extracted.get("title") or article.title
@@ -146,17 +167,54 @@ def process_article(article_id: str) -> dict:
             except Exception as exc:
                 logger.warning("[article-pipeline:%s] Mindmap failed: %s", article_id, exc)
 
-            return fast_summaries
+            return {
+                "summary_count": len(fast_summaries),
+                "source_type": article_source_type,
+                "user_id": str(article_user_id) if article_user_id else None,
+                "kb_id": str(article_kb_id) if article_kb_id else None,
+                "in_wiki": article_in_wiki,
+            }
 
-        fast_summaries = run_async(_do())
+        result = run_async(_do())
+
+        if (
+            result["source_type"] == "curate_pick"
+            and not result["in_wiki"]
+            and result["user_id"]
+        ):
+            logger.info("[article-pipeline:%s] Handing off to wiki ingest", article_id)
+            _step(article_id, "compiling", 90, "内容已整理完成，正在加入知识库...")
+            delete_entity_heartbeat("article", article_id)
+            ingest_article(article_id, result["user_id"], result["kb_id"])
+        else:
+            _step(article_id, "done", 100, "处理完成")
 
         total = time.monotonic() - pipeline_start
         logger.info("[article-pipeline:%s] === Complete in %.1fs ===", article_id, total)
-
-        _step(article_id, "done", 100, "处理完成")
         delete_entity_heartbeat("article", article_id)
 
-        return {"article_id": article_id, "state": "done", "summary_count": len(fast_summaries)}
+        # 持久化「解析完成」通知：给文章 owner 写一条（幂等）
+        try:
+            from app.services.curate_v2.notifier import (
+                create_organize_done_notification_for_article,
+            )
+            from app.tasks.shared import get_sync_engine
+            from sqlalchemy import text as _text
+            _art_user_id = result.get("user_id")
+            if _art_user_id:
+                with get_sync_engine().connect() as _nconn:
+                    _trow = _nconn.execute(
+                        _text("SELECT title FROM articles WHERE id = :aid"),
+                        {"aid": article_id},
+                    ).fetchone()
+                _art_title = _trow[0] if _trow and _trow[0] else None
+                create_organize_done_notification_for_article(
+                    _art_user_id, article_id, _art_title
+                )
+        except Exception as _ne:
+            logger.warning("[article-pipeline:%s] organize_done notification failed: %s", article_id, _ne)
+
+        return {"article_id": article_id, "state": "done", "summary_count": result["summary_count"]}
 
     except SoftTimeLimitExceeded:
         logger.error("[article-pipeline:%s] Timeout", article_id)
@@ -165,7 +223,8 @@ def process_article(article_id: str) -> dict:
 
     except Exception as exc:
         logger.exception("[article-pipeline:%s] Failed: %s", article_id, exc)
-        _step(article_id, "failed", 0, str(exc))
+        message = "原帖已删除或暂时不可访问" if str(exc) == SOURCE_UNAVAILABLE_ERROR else "文章整理失败，请稍后重试"
+        _step(article_id, "failed", 0, message)
         raise
 
     finally:

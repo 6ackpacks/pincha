@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, Suspense, lazy } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Clock, ShareNetwork, CheckCircle, XCircle, CircleNotch, Trash } from "@phosphor-icons/react";
+import { useMemo, useState, useEffect, useRef, Suspense } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Clock, ShareNetwork, BookmarkSimple, CheckCircle, XCircle, CircleNotch, Trash, YoutubeLogo } from "@phosphor-icons/react";
 import { proxyThumbnail } from "@/lib/api/client";
 import { VideoPlayer } from "@/components/video/video-player";
 import { AudioPlayer } from "@/components/audio/audio-player";
@@ -14,12 +15,11 @@ import { useWikiCompile } from "@/hooks/use-wiki-compile";
 import { parseDurationToSeconds, extractChapters } from "@/lib/video-utils";
 import { Sidebar } from "@/components/layout/sidebar";
 import { KBSelectDialog } from "@/components/knowledge/kb-select-dialog";
-import { cn, stripMarkdown } from "@/lib/utils";
-import { STATE_LABELS } from "@/lib/constants";
+import { NoSubtitleDialog } from "@/components/video/no-subtitle-dialog";
+import { cn, sanitizeUserFacingError, stripMarkdown } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
+import { STATE_LABELS, UI_LABELS } from "@/lib/constants";
 import { VideoPageSkeleton, VideoPageError, DeleteConfirmDialog, ShareCardDialog } from "./components";
-
-// framer-motion blocks ~300ms of JS parse — only needed for flying-item animation
-const FlyingItem = lazy(() => import("./flying-item").then((m) => ({ default: m.FlyingItem })));
 
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
@@ -29,13 +29,17 @@ const PLATFORM_LABELS: Record<string, string> = {
 export default function VideoAnalysisPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const videoId = params.id;
 
   const {
     videoQuery, progressQuery, transcriptQuery, mindmapQuery,
     deleteMutation, reprocessMutation,
-    video, progress, segments, segmentsEn,
+    video, progress, segments, segmentsEn, transcript,
     errorCountRef, pollCountRef, queryClient,
+    streamingSummary,
+    showNoSubtitle, setShowNoSubtitle,
+    generationId,
   } = useVideoPageData(videoId);
 
   const {
@@ -47,25 +51,33 @@ export default function VideoAnalysisPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showWikiPrompt, setShowWikiPrompt] = useState(false);
   const [showShareCard, setShowShareCard] = useState(false);
+  const [processingTimeout, setProcessingTimeout] = useState(false);
   const prevStateRef = useRef<string | undefined>(undefined);
+  const openedKnowledgeDialogRef = useRef(false);
 
   // When processing finishes, refresh all dependent data
   useEffect(() => {
-    if (progressQuery.data?.state === "done" || progressQuery.data?.state === "failed") {
+    if (progress?.state === "done" || progress?.state === "failed") {
       queryClient.invalidateQueries({ queryKey: ["video", videoId] });
       queryClient.invalidateQueries({ queryKey: ["transcript", videoId] });
       queryClient.invalidateQueries({ queryKey: ["mindmap", videoId] });
+      queryClient.invalidateQueries({ queryKey: ["summaryAvailable", videoId] });
+      // NOTE: do NOT invalidate ["summary", videoId] here. detailed is injected
+      // by the SSE onDone callback (final content) and highlight/express are
+      // refetched precisely by onLevelReady. A wildcard invalidate would empty
+      // the injected detailed cache and cause the panel to flicker back to the
+      // streaming placeholder.
     }
-  }, [progressQuery.data?.state, queryClient, videoId]);
+  }, [progress?.state, queryClient, videoId]);
 
   // Show wiki prompt when video transitions from processing to done
   useEffect(() => {
-    const state = progressQuery.data?.state;
+    const state = progress?.state;
     if (prevStateRef.current && prevStateRef.current !== "done" && state === "done" && !video?.in_wiki) {
       setShowWikiPrompt(true);
     }
     prevStateRef.current = state;
-  }, [progressQuery.data?.state, video?.in_wiki]);
+  }, [progress?.state, video?.in_wiki]);
 
   useVideoSync(segments);
 
@@ -74,6 +86,26 @@ export default function VideoAnalysisPage() {
   const isDone = currentState === "done";
   const isFailed = currentState === "failed";
   const isProcessing = !isDone && !isFailed;
+
+  useEffect(() => {
+    if (openedKnowledgeDialogRef.current) return;
+    if (searchParams.get("addToKnowledge") !== "1") return;
+    if (!isDone || video?.in_wiki || wikiCompiling) return;
+    openedKnowledgeDialogRef.current = true;
+    setShowKBDialog(true);
+  }, [isDone, searchParams, setShowKBDialog, video?.in_wiki, wikiCompiling]);
+
+  // Timeout warning when processing takes too long (60s)
+  useEffect(() => {
+    if (!isProcessing) {
+      setProcessingTimeout(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setProcessingTimeout(true);
+    }, 60000);
+    return () => clearTimeout(timer);
+  }, [isProcessing]);
 
   const videoDuration = parseDurationToSeconds(video?.duration);
   const chapters = useMemo(
@@ -92,12 +124,23 @@ export default function VideoAnalysisPage() {
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
 
-      {/* Flying item animation — wiki ingest (lazy-loaded to unblock initial render) */}
-      <Suspense fallback={null}>
+      {/* Flying item animation — wiki ingest */}
+      <AnimatePresence>
         {flyingItem && (
-          <FlyingItem keyName={flyingItem.key} onComplete={() => setFlyingItem(null)} />
+          <motion.div
+            key={flyingItem.key}
+            initial={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+            animate={{ opacity: 0, y: -80, x: 300, scale: 0.4 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
+            onAnimationComplete={() => setFlyingItem(null)}
+            className="fixed top-1/3 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-500/30 pointer-events-none flex items-center gap-2"
+          >
+            <BookmarkSimple size={14} weight="bold" />
+            已加入收录队列
+          </motion.div>
         )}
-      </Suspense>
+      </AnimatePresence>
 
       {/* Top Header */}
       <header className="sticky top-0 z-50 px-6 h-[60px] flex items-center gap-4 bg-white/80 backdrop-blur-md border-b border-zinc-200">
@@ -112,7 +155,11 @@ export default function VideoAnalysisPage() {
         <div className="flex items-center gap-3">
           {video?.platform && (
             <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200/60">
-              <span className={cn("w-2 h-2 rounded-full", video.platform === "youtube" ? "bg-red-500" : video.platform === "podcast" ? "bg-purple-500" : "bg-sky-500")} />
+              {video.platform === "youtube" ? (
+                <YoutubeLogo size={13} weight="fill" className="text-red-500" />
+              ) : (
+                <span className={cn("w-2 h-2 rounded-full", video.platform === "podcast" ? "bg-purple-500" : "bg-sky-500")} />
+              )}
               {PLATFORM_LABELS[video.platform] || video.platform}
             </span>
           )}
@@ -137,11 +184,9 @@ export default function VideoAnalysisPage() {
       {/* Progress bar */}
       {isProcessing && (
         <div className="px-6 py-3 border-b border-zinc-200 bg-white shrink-0 shadow-sm flex items-center gap-4 relative z-10">
+          <img src={cdnUrl("/mascot/cha_lens.gif")} alt="" className="w-8 h-8 object-contain shrink-0" />
           <div className="flex-1 h-2 rounded-full bg-zinc-100 overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 rounded-full transition-[width] duration-500 ease-out"
-              style={{ width: `${currentProgress}%` }}
-            />
+            <motion.div className="h-full bg-emerald-500 rounded-full" initial={{ width: 0 }} animate={{ width: `${currentProgress}%` }} transition={{ duration: 0.5, ease: "easeOut" }} />
           </div>
           <span className="text-xs font-mono font-bold text-zinc-400 w-10 text-right">{currentProgress}%</span>
           <span className="text-xs font-bold text-emerald-600">{STATE_LABELS[currentState] || currentState}...</span>
@@ -161,6 +206,16 @@ export default function VideoAnalysisPage() {
         </div>
       )}
 
+      {/* Processing timeout warning */}
+      {processingTimeout && isProcessing && (
+        <div className="mx-6 mt-4 mb-2 p-3 rounded-xl bg-amber-50 border border-amber-100 shrink-0 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-amber-700">处理时间较长，请耐心等待</p>
+            <p className="text-[11px] text-amber-600 mt-0.5">视频越长处理时间越久，可以先做其他事情稍后回来查看</p>
+          </div>
+        </div>
+      )}
+
       {/* Error banner */}
       {isFailed && (
         <div className="mx-6 mt-4 mb-2 p-4 rounded-xl bg-red-50 border border-red-100 shrink-0">
@@ -168,7 +223,7 @@ export default function VideoAnalysisPage() {
             <div>
               <p className="text-sm font-bold text-red-600 mb-1">整理遇到问题</p>
               <p className="text-xs text-red-500 font-medium break-all">
-                {progress?.message || video?.status?.message || "未知错误，请确保视频链接可公开访问。"}
+                {sanitizeUserFacingError(progress?.message || video?.status?.message, "未知错误，请确保视频链接可公开访问。")}
               </p>
             </div>
             <button
@@ -177,7 +232,7 @@ export default function VideoAnalysisPage() {
               className="shrink-0 ml-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors"
             >
               {reprocessMutation.isPending ? <CircleNotch className="w-4 h-4 animate-spin" /> : null}
-              {reprocessMutation.isPending ? "重试中" : "重新整理"}
+              {reprocessMutation.isPending ? "重试中" : UI_LABELS.REPROCESS}
             </button>
           </div>
         </div>
@@ -209,20 +264,20 @@ export default function VideoAnalysisPage() {
       </AnimatePresence>
 
       {/* Two-column split view */}
-      <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative z-0">
+      <main className="min-h-0 flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden relative z-0">
         {/* Left column — Video + Chapter (55%) */}
-        <div className="w-full lg:w-[55%] flex flex-col gap-4 p-6 overflow-y-auto">
+        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3 }} className="w-full min-h-0 lg:h-full lg:w-[55%] flex flex-col gap-4 p-6 pb-8 shrink-0 lg:shrink overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:#d4d4d8_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent">
           {video?.platform === "podcast" ? (
             <div className="flex-shrink-0">
               <AudioPlayer audioUrl={video?.url || ""} thumbnailUrl={proxyThumbnail(video?.thumbnail_url)} title={video?.title} showName={video?.show_name} host={video?.host} />
             </div>
           ) : (
             <div className="rounded-2xl overflow-hidden shadow-md border border-zinc-200 bg-black aspect-video flex-shrink-0">
-              <VideoPlayer url={video?.url || ""} title={video?.title} thumbnailUrl={proxyThumbnail(video?.thumbnail_url)} platform={video?.platform} />
+              <VideoPlayer url={video?.url || ""} title={video?.title} thumbnailUrl={proxyThumbnail(video?.thumbnail_url, "full")} platform={video?.platform} />
             </div>
           )}
 
-          {isDone && chapters.length > 0 && <ChapterBar chapters={chapters} videoDuration={videoDuration} />}
+          {isDone && chapters.length > 0 && <ChapterBar chapters={chapters} videoDuration={videoDuration} className="shrink-0 lg:max-h-[clamp(220px,32svh,420px)]" />}
 
           {/* Action toolbar */}
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -259,10 +314,10 @@ export default function VideoAnalysisPage() {
               删除
             </button>
           </div>
-        </div>
+        </motion.div>
 
         {/* Right column — Tab panel (45%) */}
-        <div className="w-full lg:w-[45%] flex flex-col h-full border-l border-zinc-200 bg-white">
+        <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.3, delay: 0.05 }} className="w-full lg:w-[45%] flex flex-col min-h-[400px] lg:min-h-0 lg:h-full border-l border-zinc-200 bg-white">
           <Suspense fallback={
             <div className="p-4 space-y-3 animate-pulse">
               <div className="flex gap-4 border-b pb-3">
@@ -278,21 +333,25 @@ export default function VideoAnalysisPage() {
             <TabPanel
               videoId={videoId}
               videoTitle={video?.title ?? undefined}
-              thumbnail={video?.thumbnail_url ? (proxyThumbnail(video.thumbnail_url) ?? undefined) : undefined}
+              thumbnail={video?.thumbnail_url ? (proxyThumbnail(video.thumbnail_url, "full") ?? undefined) : undefined}
               segments={segments}
               segmentsEn={segmentsEn}
+              language={transcript?.language ?? "zh"}
               isTranscriptLoading={transcriptQuery.isLoading}
               isDone={isDone}
               currentState={currentState}
+              streamingSummary={streamingSummary}
+              generationId={generationId}
             />
           </Suspense>
-        </div>
+        </motion.div>
       </main>
       </div>
 
       <DeleteConfirmDialog open={confirmDelete} onClose={() => setConfirmDelete(false)} deleteMutation={deleteMutation} />
       {showShareCard && video && <ShareCardDialog open={showShareCard} onClose={() => setShowShareCard(false)} video={video} videoId={videoId} />}
       <KBSelectDialog open={showKBDialog} onOpenChange={setShowKBDialog} onConfirm={(kbId) => addToWikiMutation.mutate(kbId)} loading={addToWikiMutation.isPending} />
+      <NoSubtitleDialog open={showNoSubtitle} onClose={() => setShowNoSubtitle(false)} />
     </div>
   );
 }

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion } from "framer-motion";
-import { CheckCircle } from "@phosphor-icons/react";
+import { CheckCircle, YoutubeLogo } from "@phosphor-icons/react";
 import { cn, stripMarkdown } from "@/lib/utils";
 import { proxyThumbnail, type VideoResponse } from "@/lib/api";
 
@@ -18,7 +19,7 @@ const CARD_GRADIENTS = [
   "from-teal-500 to-emerald-600",
 ];
 
-export function VideoCard({ video, index }: { video: VideoResponse; index: number }) {
+export function VideoCard({ video, index, href }: { video: VideoResponse; index: number; href?: string }) {
   const state = video.status?.state ?? "unknown";
   const isDone = state === "done";
   const thumbSrc = video.thumbnail_url ? (proxyThumbnail(video.thumbnail_url) ?? video.thumbnail_url) : null;
@@ -28,10 +29,19 @@ export function VideoCard({ video, index }: { video: VideoResponse; index: numbe
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.05 }} className="shrink-0 w-[240px]">
-      <Link href={`/videos/${video.id}`} className="block group">
+      <Link href={href ?? `/videos/${video.id}`} className="block group">
         <div className="relative aspect-video rounded-xl overflow-hidden bg-zinc-100">
           {!showTextCover ? (
-            <img src={thumbSrc!} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={() => setImgFailed(true)} />
+            <Image
+              src={thumbSrc!}
+              alt={video.title || ""}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+              sizes="240px"
+              unoptimized
+              priority={index < 4}
+              onError={() => setImgFailed(true)}
+            />
           ) : (
             <div className={cn("w-full h-full flex flex-col justify-end p-4 bg-gradient-to-br", gradient)}>
               <p className="text-white text-sm font-bold leading-tight line-clamp-3 drop-shadow-sm">
@@ -45,9 +55,15 @@ export function VideoCard({ video, index }: { video: VideoResponse; index: numbe
           {video.duration && (
             <span className="absolute bottom-2 right-2 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/75 text-white">{video.duration}</span>
           )}
-          <span className={cn("absolute top-2 left-2 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-sm", video.platform === "youtube" ? "bg-red-500" : "bg-purple-500")}>
-            {video.platform === "youtube" ? "Y" : "P"}
-          </span>
+          {video.platform === "youtube" ? (
+            <span className="absolute top-2 left-2 w-5 h-5 rounded-md flex items-center justify-center bg-red-500 shadow-sm">
+              <YoutubeLogo size={11} weight="fill" className="text-white" />
+            </span>
+          ) : (
+            <span className="absolute top-2 left-2 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-purple-500 shadow-sm">
+              P
+            </span>
+          )}
         </div>
         <div className="mt-2.5 px-0.5">
           <p className="text-sm font-semibold text-zinc-800 line-clamp-1 group-hover:text-zinc-600 transition-colors">{stripMarkdown(video.title) || "无标题"}</p>

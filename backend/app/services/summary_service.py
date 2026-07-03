@@ -50,7 +50,7 @@ def _get_redis_pool() -> aioredis.Redis:
 
     This avoids creating unbounded connections when called concurrently.
     The pool limits max connections to prevent memory/FD exhaustion on
-    small containers (e.g., Zeabur K3s 512MB-1GB pods).
+    small containers (e.g., 512MB-1GB pods).
     """
     pool = aioredis.ConnectionPool.from_url(
         settings.REDIS_URL,

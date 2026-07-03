@@ -5,20 +5,22 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
 import { Sidebar } from "@/components/layout/sidebar";
 import {
   getCurateV2Channels,
   getCurateV2ChannelPicks,
   subscribeCurateV2Channel,
   unsubscribeCurateV2Channel,
-  triggerDeepAnalyze,
   type CurateV2Channel,
   type CurateV2Pick,
 } from "@/lib/api/curate";
 import { getMe } from "@/lib/api/auth";
+import { useCurateDeepAnalyze, useSyncCurateArticleQueue } from "@/hooks/use-curate-deep-analyze";
+import { getCurateImportUiState } from "@/lib/curate-article";
 import { cn, stripMarkdown } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import {
-  ArrowsClockwise,
   Bell,
   BellSlash,
   CalendarBlank,
@@ -44,12 +46,12 @@ import {
 // ---------------------------------------------------------------------------
 
 const CHANNEL_IMAGES = [
-  "/channel-1-ai-product-launch.png",
-  "/channel-2-ai-tutorial.png",
-  "/channel-3-ai-product-insight.png",
-  "/channel-4-ai-deep-read.png",
-  "/channel-5-ai-daily-brief.png",
-];
+  "/channel-1-ai-product-launch.webp",
+  "/channel-2-ai-tutorial.webp",
+  "/channel-3-ai-product-insight.webp",
+  "/channel-4-ai-deep-read.webp",
+  "/channel-5-ai-daily-brief.webp",
+].map(cdnUrl);
 
 function getRecentDates(count: number): string[] {
   const dates: string[] = [];
@@ -99,7 +101,7 @@ export default function CuratePage() {
     staleTime: 30 * 60 * 1000,
   });
 
-  const { data: channels = [], isLoading: catLoading, refetch } = useQuery({
+  const { data: channels = [], isLoading: catLoading } = useQuery({
     queryKey: ["curate-v2-channels"],
     queryFn: getCurateV2Channels,
   });
@@ -121,6 +123,7 @@ export default function CuratePage() {
       subscribeCurateV2Channel(channelId, emailEnabled, emailAddress),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setSubscribeTarget(null);
       setEmailEnabled(false);
       setEmailAddress("");
@@ -131,13 +134,12 @@ export default function CuratePage() {
     mutationFn: (channelId: number) => unsubscribeCurateV2Channel(channelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setUnsubscribeTarget(null);
     },
   });
 
-  const deepAnalyzeMut = useMutation({
-    mutationFn: triggerDeepAnalyze,
-  });
+  const deepAnalyzeMut = useCurateDeepAnalyze([["curate-v2-picks", currentSlug, selectedDate]]);
 
   const recentDates = getRecentDates(14);
 
@@ -174,17 +176,7 @@ export default function CuratePage() {
           <div className="flex items-start justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-zinc-900">猹选</h1>
-              <p className="text-sm text-zinc-500 mt-1">
-                每天替你筛出值得细读的内容线索
-              </p>
             </div>
-            <button
-              onClick={() => refetch()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-zinc-200 text-zinc-600 hover:bg-zinc-50 transition-colors"
-            >
-              <ArrowsClockwise size={12} weight="bold" />
-              刷新
-            </button>
           </div>
 
           {/* Channel tabs (mascot image cards) */}
@@ -203,26 +195,20 @@ export default function CuratePage() {
                     key={channel.id}
                     onClick={() => handleChannelChange(channel.slug)}
                     className={cn(
-                      "relative h-24 rounded-xl overflow-hidden p-3 flex flex-col justify-end text-left transition-all duration-200 border",
-                      isActive
-                        ? "border-zinc-900 shadow-lg scale-[1.02] bg-white"
-                        : "border-zinc-100 bg-white opacity-75 hover:opacity-100 hover:shadow-md"
+                      "relative aspect-[3/2] overflow-hidden rounded-2xl",
+                      "transition-all duration-200 ease-out",
+                      "hover:scale-[1.03] hover:brightness-110 hover:shadow-lg",
+                      isActive && "ring-2 ring-zinc-900 shadow-xl scale-[1.02]"
                     )}
                   >
-                    <img
+                    <Image
                       src={CHANNEL_IMAGES[i % CHANNEL_IMAGES.length]}
-                      alt=""
-                      className={cn(
-                        "absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-200",
-                        isActive ? "opacity-80" : "opacity-80"
-                      )}
+                      alt={channel.name}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 768px) 50vw, 20vw"
+                      unoptimized
                     />
-                    <div className="relative z-10 flex items-center gap-1.5">
-                      <p className="text-white font-bold text-xs leading-tight drop-shadow-sm">{channel.name}</p>
-                      {channel.is_subscribed && (
-                        <CheckCircle size={12} weight="fill" className="text-emerald-300 shrink-0" />
-                      )}
-                    </div>
                   </button>
                 );
               })}
@@ -232,18 +218,15 @@ export default function CuratePage() {
           {/* Active channel header + subscribe */}
           {activeChannel && (
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Link href={`/curate/${activeChannel.slug}`} className="group">
+              <div className="flex items-center gap-4">
+                <Link href={`/curate/${activeChannel.slug}`} className="group shrink-0">
                   <h2 className="text-lg font-bold text-zinc-900 group-hover:text-emerald-600 transition-colors">
                     {activeChannel.name}
                   </h2>
                 </Link>
-                <span className="text-xs text-zinc-400 font-medium">
-                  每日 {activeChannel.pick_count} 条线索
-                </span>
                 <Link
                   href={`/curate/${activeChannel.slug}`}
-                  className="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
+                  className="text-xs text-emerald-600 hover:text-emerald-700 font-medium shrink-0"
                 >
                   查看全部 →
                 </Link>
@@ -313,7 +296,7 @@ export default function CuratePage() {
                       key={pick.id}
                       pick={pick}
                       rank={i + 1}
-                      onDeepAnalyze={() => deepAnalyzeMut.mutateAsync(pick.id)}
+                      onDeepAnalyze={() => deepAnalyzeMut.mutateAsync(pick)}
                     />
                   ))}
                 </div>
@@ -425,21 +408,22 @@ export default function CuratePage() {
 // ---------------------------------------------------------------------------
 
 function ArticleRow({ pick, rank, onDeepAnalyze }: { pick: CurateV2Pick; rank: number; onDeepAnalyze: () => Promise<unknown> }) {
-  const [analyzeState, setAnalyzeState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  useSyncCurateArticleQueue(pick);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const analyzeState = isSubmitting ? "loading" : getCurateImportUiState(pick);
   const isProduct = pick.source_type === "product";
 
   const handleAnalyze = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (analyzeState === "loading") return;
-    setAnalyzeState("loading");
+    if (analyzeState === "loading" || analyzeState === "success") return;
+    setIsSubmitting(true);
     try {
       await onDeepAnalyze();
-      setAnalyzeState("success");
-      setTimeout(() => setAnalyzeState("idle"), 3000);
     } catch {
-      setAnalyzeState("error");
-      setTimeout(() => setAnalyzeState("idle"), 3000);
+      // Keep current server-derived state; retry remains available.
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -453,11 +437,16 @@ function ArticleRow({ pick, rank, onDeepAnalyze }: { pick: CurateV2Pick; rank: n
       >
         {/* Rank or Product Avatar */}
         {isProduct && pick.author_avatar ? (
-          <img
-            src={pick.author_avatar}
-            alt={pick.title}
-            className="shrink-0 w-10 h-10 rounded-xl object-cover border border-zinc-100"
-          />
+          <div className="relative shrink-0 w-10 h-10 rounded-xl overflow-hidden border border-zinc-100">
+            <Image
+              src={pick.author_avatar}
+              alt={pick.title}
+              fill
+              className="object-cover"
+              sizes="40px"
+              unoptimized
+            />
+          </div>
         ) : (
           <span
             className={cn(
@@ -484,7 +473,16 @@ function ArticleRow({ pick, rank, onDeepAnalyze }: { pick: CurateV2Pick; rank: n
             {pick.author_name && (
               <div className="flex items-center gap-1.5">
                 {!isProduct && (pick.author_avatar ? (
-                  <img src={pick.author_avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover" />
+                  <div className="relative w-3.5 h-3.5 rounded-full overflow-hidden">
+                    <Image
+                      src={pick.author_avatar}
+                      alt=""
+                      fill
+                      className="object-cover"
+                      sizes="14px"
+                      unoptimized
+                    />
+                  </div>
                 ) : (
                   <div className="w-3.5 h-3.5 rounded-full bg-zinc-200" />
                 ))}
@@ -518,7 +516,9 @@ function ArticleRow({ pick, rank, onDeepAnalyze }: { pick: CurateV2Pick; rank: n
             {analyzeState === "loading" ? (
               <CircleNotch size={12} className="animate-spin" />
             ) : analyzeState === "success" ? (
-              <><CheckCircle size={12} weight="bold" />已提交</>
+              <><CheckCircle size={12} weight="bold" />已收录</>
+            ) : analyzeState === "error" ? (
+              <><Sparkle size={12} weight="bold" />重试收录</>
             ) : (
               <><Sparkle size={12} weight="bold" />收进知识库</>
             )}

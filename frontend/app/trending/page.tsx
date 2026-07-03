@@ -94,9 +94,9 @@ export default function TrendingPage() {
     }
   }
 
-  const limitedVideos = videoItems.slice(0, MAX_PER_TYPE);
-  const limitedPodcasts = podcastItems.slice(0, MAX_PER_TYPE);
-  const limitedArticles = articleItems.slice(0, MAX_PER_TYPE);
+  const limitedVideos = videoItems.filter(v => v.state === "done").slice(0, MAX_PER_TYPE);
+  const limitedPodcasts = podcastItems.filter(v => v.state === "done").slice(0, MAX_PER_TYPE);
+  const limitedArticles = articleItems.filter(a => a.state === "done").slice(0, MAX_PER_TYPE);
 
   const allItems = [...limitedVideos, ...limitedPodcasts, ...limitedArticles].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -203,6 +203,51 @@ export default function TrendingPage() {
                 去放入内容
               </Link>
             </div>
+          ) : activeTab === "all" ? (
+            <div className="space-y-8">
+              {limitedVideos.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Play size={16} weight="bold" className="text-red-500" />
+                    <h2 className="text-sm font-bold text-zinc-700">视频</h2>
+                    <span className="text-xs text-zinc-400">{limitedVideos.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                    {limitedVideos.map((item, i) => (
+                      <TrendingCard key={`${item.type}-${item.id}`} item={item} index={i} />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {limitedPodcasts.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Headphones size={16} weight="bold" className="text-purple-500" />
+                    <h2 className="text-sm font-bold text-zinc-700">播客</h2>
+                    <span className="text-xs text-zinc-400">{limitedPodcasts.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                    {limitedPodcasts.map((item, i) => (
+                      <TrendingCard key={`${item.type}-${item.id}`} item={item} index={i} />
+                    ))}
+                  </div>
+                </section>
+              )}
+              {limitedArticles.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <FileText size={16} weight="bold" className="text-amber-500" />
+                    <h2 className="text-sm font-bold text-zinc-700">博客</h2>
+                    <span className="text-xs text-zinc-400">{limitedArticles.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                    {limitedArticles.map((item, i) => (
+                      <TrendingCard key={`${item.type}-${item.id}`} item={item} index={i} />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
               {filtered.map((item, i) => (
@@ -240,16 +285,23 @@ function TrendingCard({ item, index }: { item: ContentItem; index: number }) {
             <img
               src={thumbSrc}
               alt=""
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
             />
+          ) : item.type === "article" ? (
+            <div className="w-full h-full flex flex-col items-start justify-end p-4 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-100">
+              <FileText size={20} weight="bold" className="text-amber-400 mb-2" />
+              <p className="text-[11px] font-bold text-amber-700/70 line-clamp-2 leading-tight">
+                {stripMarkdown(item.title) || "文章"}
+              </p>
+            </div>
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-50 to-zinc-100">
-              {item.type === "article" ? (
-                <FileText size={28} weight="bold" className="text-zinc-400" />
-              ) : item.type === "podcast" ? (
+              {item.type === "podcast" ? (
                 <Headphones size={28} weight="bold" className="text-zinc-400" />
               ) : (
                 <Play size={28} weight="bold" className="text-zinc-400" />

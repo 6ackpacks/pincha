@@ -4,8 +4,8 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text,
-    UniqueConstraint,
+    Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -140,10 +140,24 @@ class CurateDailyPick(Base):
 
 
 class CurateNotification(Base):
-    """A notification record for a user about daily picks."""
+    """A notification record for a user.
+
+    Supports two kinds of notifications:
+      * ``pick`` — daily curate pick notifications (pick_id non-null).
+      * ``organize_done`` — video/article organize-complete notifications
+        (pick_id null, action_url points to the resource).
+    """
     __tablename__ = "curate_notifications"
     __table_args__ = (
         UniqueConstraint("user_id", "pick_id", name="uq_curate_notif_user_pick"),
+        # Idempotent dedup for organize_done notifications: one per user+action_url.
+        Index(
+            "uq_curate_notif_organize_done",
+            "user_id",
+            "action_url",
+            postgresql_where=text("pick_id IS NULL AND notif_type = 'organize_done'"),
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -153,15 +167,21 @@ class CurateNotification(Base):
         nullable=False,
         index=True,
     )
-    pick_id: Mapped[int] = mapped_column(
+    pick_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("curate_daily_picks.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
+    notif_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="pick"
+    )
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    pick: Mapped["CurateDailyPick"] = relationship(lazy="select")
+    pick: Mapped["CurateDailyPick | None"] = relationship(lazy="select")

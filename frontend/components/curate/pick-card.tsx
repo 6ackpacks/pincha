@@ -4,6 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { stripMarkdown } from "@/lib/utils";
+import { getCurateImportUiState } from "@/lib/curate-article";
+import { useSyncCurateArticleQueue } from "@/hooks/use-curate-deep-analyze";
 import { ArrowSquareOut, Sparkle, SealCheck, CircleNotch, CheckCircle, CaretRight } from "@phosphor-icons/react";
 import type { CurateV2Pick } from "@/lib/api";
 
@@ -37,23 +39,25 @@ function relativeTime(dateStr: string | null): string {
 
 export interface PickCardProps {
   pick: CurateV2Pick;
-  onDeepAnalyze?: (pickId: number) => Promise<unknown> | void;
+  onDeepAnalyze?: (pick: CurateV2Pick) => Promise<unknown> | void;
   index?: number;
 }
 
 export function PickCard({ pick, onDeepAnalyze, index = 0 }: PickCardProps) {
-  const [analyzeState, setAnalyzeState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  useSyncCurateArticleQueue(pick);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const analyzeState = isSubmitting ? "loading" : getCurateImportUiState(pick);
+  const isProduct = pick.source_type === "product";
 
   const handleDeepAnalyze = async () => {
-    if (!onDeepAnalyze || analyzeState === "loading") return;
-    setAnalyzeState("loading");
+    if (!onDeepAnalyze || isProduct || analyzeState === "loading" || analyzeState === "success") return;
+    setIsSubmitting(true);
     try {
-      await onDeepAnalyze(pick.id);
-      setAnalyzeState("success");
-      setTimeout(() => setAnalyzeState("idle"), 3000);
+      await onDeepAnalyze(pick);
     } catch {
-      setAnalyzeState("error");
-      setTimeout(() => setAnalyzeState("idle"), 3000);
+      // Let the next refetch / progress poll decide the final state.
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -103,6 +107,8 @@ export function PickCard({ pick, onDeepAnalyze, index = 0 }: PickCardProps) {
                 <img
                   src={pick.author_avatar}
                   alt=""
+                  loading="lazy"
+                  decoding="async"
                   className="w-4 h-4 rounded-full object-cover"
                 />
               ) : (
@@ -142,7 +148,7 @@ export function PickCard({ pick, onDeepAnalyze, index = 0 }: PickCardProps) {
             <ArrowSquareOut size={12} weight="bold" />
             查看原文
           </a>
-          {onDeepAnalyze && (
+          {onDeepAnalyze && !isProduct && (
             <button
               onClick={handleDeepAnalyze}
               disabled={analyzeState === "loading" || analyzeState === "success"}
@@ -163,6 +169,11 @@ export function PickCard({ pick, onDeepAnalyze, index = 0 }: PickCardProps) {
                 <>
                   <CheckCircle size={12} weight="bold" />
                   已收录
+                </>
+              ) : analyzeState === "error" ? (
+                <>
+                  <Sparkle size={12} weight="bold" />
+                  重试收录
                 </>
               ) : (
                 <>

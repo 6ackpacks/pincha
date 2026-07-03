@@ -2,8 +2,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from typing import List
+from urllib.parse import urlparse
 
 import secrets as _secrets
 
@@ -14,7 +16,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_optional_user
 from app.core.rate_limit import limiter
 from app.core.url_validator import validate_url_async, SSRFError
 from app.core.sse_limiter import SSEConnectionGuard, sse_concurrency_guard
@@ -38,7 +40,9 @@ from app.config import settings
 from app.models.summary import Summary
 from app.models.transcript import Transcript
 from app.models.user import User
+from app.models.user_video import UserVideo
 from app.models.video import Video
+from app.models.mindmap import Mindmap
 from app.schemas.video import VideoCreate, VideoProgress, VideoResponse
 from app.schemas.transcript import TranscriptResponse
 from app.schemas.summary import SummaryResponse
@@ -48,6 +52,36 @@ from app.services.video_service import dispatch_video_processing
 from app.core.progress import heartbeat_key, sse_progress_stream
 
 router = APIRouter(prefix="/videos", tags=["videos"])
+
+_YOUTUBE_RE = re.compile(
+    r"^https?://(www\.|m\.|music\.)?youtu(\.be|be\.com)/",
+    re.IGNORECASE,
+)
+
+_PODCAST_HOSTS = {
+    "xiaoyuzhoufm.com",
+    "www.xiaoyuzhoufm.com",
+    "ximalaya.com",
+    "www.ximalaya.com",
+    "podcasts.apple.com",
+}
+
+
+def _is_supported_video_url(url: str, platform: str) -> str | None:
+    """Return an error message if the URL is not supported for the given platform, else None."""
+    if platform == "youtube":
+        if not _YOUTUBE_RE.match(url):
+            return "当前仅支持 YouTube 视频链接"
+    elif platform == "podcast":
+        try:
+            host = urlparse(url).hostname or ""
+        except Exception:
+            return "无效的链接格式"
+        host = host.lower()
+        if not any(host == h or host.endswith("." + h) for h in _PODCAST_HOSTS):
+            return "当前仅支持小宇宙、喜马拉雅和 Apple Podcasts 链接"
+    return None
+
 
 # 保持后台 task 的强引用，防止 GC 在 task 完成前回收
 _background_tasks: set = set()
@@ -122,6 +156,11 @@ async def submit_video(
     - If new, creates the video record, links it to the user, dispatches the pipeline, returns 201.
     """
     url_str = str(payload.url)
+
+    # 平台级校验：在进入处理流程前拦截不支持的链接
+    err = _is_supported_video_url(url_str, payload.platform)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
 
     # SSRF 防护：校验用户提交的 URL 不指向内网
     try:
@@ -204,6 +243,86 @@ async def popular_videos(
     """
     videos = await video_service.list_popular_videos(db, limit=limit)
     return videos
+
+
+@router.get("/public/{video_id}/full")
+async def get_public_video_full(
+    video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """Public read-only detail for videos shown in platform-wide popular feeds."""
+    video = (await db.execute(
+        select(Video).where(
+            Video.id == video_id,
+            Video.is_hidden == False,
+            Video.status["state"].astext == "done",
+        )
+    )).scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status_code=404, detail="内容不存在或暂不可公开访问")
+
+    # Mark whether the logged-in viewer already has this video in their library,
+    # so the public page can show "进入解析" instead of "加入我的解析".
+    in_library = False
+    if current_user is not None:
+        owned = await db.execute(
+            select(UserVideo.id).where(
+                UserVideo.user_id == current_user.id,
+                UserVideo.video_id == video_id,
+            )
+        )
+        in_library = owned.scalar_one_or_none() is not None
+
+    video_resp = VideoResponse.model_validate(video)
+    video_resp.in_library = in_library
+
+    transcript = (await db.execute(
+        select(Transcript).where(Transcript.video_id == video_id)
+    )).scalar_one_or_none()
+    summaries = (await db.execute(
+        select(Summary).where(Summary.video_id == video_id)
+    )).scalars().all()
+    mindmap = (await db.execute(
+        select(Mindmap).where(Mindmap.video_id == video_id)
+    )).scalar_one_or_none()
+
+    task = asyncio.create_task(_increment_view(video_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_log_task_exception)
+
+    return {
+        "video": video_resp.model_dump(mode="json"),
+        "transcript": TranscriptResponse.model_validate(transcript).model_dump(mode="json") if transcript else None,
+        "summaries": [
+            SummaryResponse.model_validate(s).model_dump(mode="json")
+            for s in summaries
+        ],
+        "mindmap": MindmapResponse.model_validate(mindmap).model_dump(mode="json") if mindmap else None,
+    }
+
+
+@router.post("/{video_id}/add-to-library", response_model=VideoResponse)
+async def add_video_to_library(
+    video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Attach an existing public video analysis to the current user's library."""
+    video = (await db.execute(
+        select(Video).where(
+            Video.id == video_id,
+            Video.is_hidden == False,
+            Video.status["state"].astext == "done",
+        )
+    )).scalar_one_or_none()
+    if video is None:
+        raise HTTPException(status_code=404, detail="内容不存在或暂不可加入")
+
+    await video_service.add_user_video(db, current_user.id, video.id, source="manual")
+    await cache_delete(videos_list_key(str(current_user.id)))
+    return video
 
 
 @router.get("/health/pipeline")
@@ -487,7 +606,7 @@ async def stream_video_progress(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",  # 禁用 nginx/Zeabur 缓冲
+            "X-Accel-Buffering": "no",  # 禁用 nginx/托管平台缓冲
             "Connection": "keep-alive",
             "Content-Encoding": "identity",  # 阻止 GZipMiddleware 压缩 SSE 流
         },
@@ -506,7 +625,7 @@ async def delete_video(
     """
     removed = await video_service.remove_user_video(db, current_user.id, video_id)
     if not removed:
-        raise HTTPException(status_code=404, detail="Video not found in your library")
+        raise HTTPException(status_code=404, detail="该视频不在你的书房中，可能已被删除")
     await cache_delete(videos_list_key(str(current_user.id)), video_detail_key(str(video_id)))
     return None
 

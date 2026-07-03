@@ -71,10 +71,15 @@ export function getArticles() {
   return request<ArticleSummary[]>("/api/v1/wiki/articles");
 }
 
-export function deleteArticle(id: string) {
-  return request<{ message: string }>(`/api/v1/wiki/articles/${id}`, {
-    method: "DELETE",
-  });
+export async function deleteArticle(id: string) {
+  try {
+    return await request<{ message: string }>(`/api/v1/wiki/articles/${id}`, {
+      method: "DELETE",
+    });
+  } catch (err) {
+    if (err instanceof Error && /not found/i.test(err.message)) return;
+    throw err;
+  }
 }
 
 export function getTrendingArticles(limit = 20) {

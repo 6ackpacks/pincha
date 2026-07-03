@@ -7,6 +7,7 @@ import { useAtom, useSetAtom } from "jotai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { streamWikiAsk, getMe, listConversations, createConversation, updateConversation, deleteConversation, type KBConversation } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import { mascotAnimStateAtom } from "@/atoms/mascot";
 import { activeKbIdAtom } from "@/atoms/kb";
 
@@ -23,21 +24,26 @@ const EXAMPLE_QUESTIONS = [
 
 function TypingIndicator() {
   return (
-    <span className="inline-flex items-center gap-[3px] py-1">
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_infinite]" />
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.15s_infinite]" />
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.3s_infinite]" />
-    </span>
+    <div className="flex items-end gap-3 py-2">
+      <img src={cdnUrl("/mascot/loading.gif")} alt="" className="w-12 h-12 object-contain shrink-0" />
+      <div className="bg-zinc-100 rounded-2xl px-4 py-3">
+        <span className="inline-flex items-center gap-[3px]">
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_infinite]" />
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.15s_infinite]" />
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.3s_infinite]" />
+        </span>
+      </div>
+    </div>
   );
 }
 
 function AiAvatar() {
   return (
-    <div className="w-7 h-7 rounded-full shrink-0 mt-0.5 flex items-center justify-center bg-gradient-to-br from-emerald-400 to-teal-500 shadow-sm">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-white">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    </div>
+    <img
+      src="/brand/pincha-script.svg"
+      alt="品猹"
+      className="w-7 h-7 rounded-full shrink-0 mt-0.5 shadow-sm bg-white object-contain p-0.5"
+    />
   );
 }
 
@@ -392,8 +398,9 @@ export function KnowledgeQAPanel({ defaultCollapsed = false }: KnowledgeQAPanelP
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
         {initializing ? (
-          <div className="flex justify-center py-10">
-            <CircleNotch size={20} weight="bold" className="animate-spin text-zinc-300" />
+          <div className="flex flex-col items-center justify-center py-8 gap-2">
+            <img src={cdnUrl("/mascot/loading.gif")} alt="" className="w-16 h-16 object-contain" />
+            <p className="text-xs text-zinc-400">猹正在准备...</p>
           </div>
         ) : messages.length === 0 ? (
           <div className="space-y-2.5 mt-4">

@@ -9,6 +9,7 @@ import { useAtom, useSetAtom } from "jotai";
 import ReactMarkdown from "react-markdown";
 import { streamWikiAsk, streamVideoAsk, getVideo, addVideoToWiki } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import { mascotOpenAtom, mascotTriggerAtom, mascotAnimStateAtom } from "@/atoms/mascot";
 import { addToQueueAtom } from "@/atoms/queue";
 import { TransparentVideo, type TransparentVideoHandle } from "./transparent-video";
@@ -149,21 +150,21 @@ export function FloatingMascot() {
     return () => { abortRef.current?.abort(); };
   }, [pathname]);
 
-  useEffect(() => {
-    if (triggered && !open) {
-      setTriggered(false);
-      handleOpen();
-    }
-  }, [triggered]);
-
-  const handleOpen = () => {
+  const handleOpen = useCallback(() => {
     if (open) return;
     setAnimState("flying");
     setTimeout(() => {
       setOpen(true);
       setAnimState("open");
     }, 500);
-  };
+  }, [open, setOpen]);
+
+  useEffect(() => {
+    if (triggered && !open) {
+      setTriggered(false);
+      handleOpen();
+    }
+  }, [triggered, open, setTriggered, handleOpen]);
 
   const handleToggle = () => {
     if (open) {
@@ -339,7 +340,7 @@ export function FloatingMascot() {
             background: "#e5e7eb", flexShrink: 0,
             border: "1.5px solid rgba(16,185,129,0.4)",
           }}>
-            <img src="/mascot-character.png" alt="品猹助手" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={cdnUrl("/mascot-character.png")} alt="品猹助手" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ color: "#111827", fontWeight: 700, fontSize: 13, lineHeight: 1.3, margin: 0 }}>品猹助手</p>
@@ -446,7 +447,7 @@ export function FloatingMascot() {
                   width: 26, height: 26, borderRadius: "50%", overflow: "hidden",
                   background: "#e5e7eb", flexShrink: 0, border: "1px solid rgba(16,185,129,0.3)",
                 }}>
-                  <img src="/mascot-character.png" alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img src={cdnUrl("/mascot-character.png")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
               ) : (
                 <div style={{
@@ -571,7 +572,7 @@ export function FloatingMascot() {
       >
         {/* Static fallback (shown in idle state) */}
         <img
-          src="/mascot-character.png"
+          src={cdnUrl("/mascot-character.png")}
           alt="品猹助手"
           style={{
             width: "100%", height: "100%", objectFit: "contain",
@@ -589,7 +590,7 @@ export function FloatingMascot() {
         }}>
           <TransparentVideo
             ref={hoverVideoRef}
-            src="/mascot/mascot-hover.webm"
+            src={cdnUrl("/mascot/mascot-hover.webm")}
             loop
             threshold={12}
           />
@@ -603,7 +604,7 @@ export function FloatingMascot() {
         }}>
           <TransparentVideo
             ref={thinkingVideoRef}
-            src="/mascot/mascot-thinking.webm"
+            src={cdnUrl("/mascot/mascot-thinking.webm")}
             loop
             threshold={12}
           />
@@ -617,7 +618,7 @@ export function FloatingMascot() {
         }}>
           <TransparentVideo
             ref={answerVideoRef}
-            src="/mascot/mascot-answer.webm"
+            src={cdnUrl("/mascot/mascot-answer.webm")}
             onEnded={() => setMascotAnim("idle")}
             threshold={12}
           />

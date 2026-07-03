@@ -7,8 +7,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import {
   ArrowLeft,
-  FileText,
-  ShareNetwork,
   CircleNotch,
   Trash,
   CheckCircle,
@@ -31,11 +29,12 @@ import {
   triggerFullArticleSummary,
   getArticleAnalysisMindmap,
   regenerateArticleMindmap,
-  type ArticleStatus,
   type SummaryLevel,
 } from "@/lib/api/articles";
 import { Sidebar } from "@/components/layout/sidebar";
-import { cn, stripMarkdown } from "@/lib/utils";
+import { ReadableArticleContent } from "@/components/curate/readable-article-content";
+import { cn, extractReadableText, sanitizeUserFacingError, stripMarkdown } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import { STATE_LABELS, SUMMARY_LEVELS } from "@/lib/constants";
 
 const TABS = [
@@ -55,7 +54,6 @@ export default function ArticleAnalysisPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [activeLevel, setActiveLevel] = useState<SummaryLevel>("express");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [fullGenerating, setFullGenerating] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,16 +85,19 @@ export default function ArticleAnalysisPage() {
 
   const article = articleQuery.data;
   const progress = progressQuery.data;
+  const articleContent = extractReadableText(article?.content);
   const currentState = progress?.state ?? article?.status.state ?? "pending";
   const currentProgress = progress?.progress ?? article?.status.progress ?? 0;
+  const isKnowledgeBaseCompiling = currentState === "compiling";
   const isDone = currentState === "done";
   const isFailed = currentState === "failed";
   const isProcessing = !isDone && !isFailed;
+  const canReadAnalysis = !isFailed && (isDone || isKnowledgeBaseCompiling);
 
   const summaryQuery = useQuery({
     queryKey: ["articleSummary", articleId, activeLevel],
     queryFn: () => getArticleAnalysisSummary(articleId, activeLevel),
-    enabled: !!articleId && isDone && activeTab === "summary",
+    enabled: !!articleId && canReadAnalysis && activeTab === "summary",
     staleTime: Infinity,
     retry: 1,
   });
@@ -104,7 +105,7 @@ export default function ArticleAnalysisPage() {
   const mindmapQuery = useQuery({
     queryKey: ["articleMindmap", articleId],
     queryFn: () => getArticleAnalysisMindmap(articleId),
-    enabled: !!articleId && isDone && activeTab === "mindmap",
+    enabled: !!articleId && canReadAnalysis && activeTab === "mindmap",
     staleTime: Infinity,
   });
 
@@ -173,14 +174,6 @@ export default function ArticleAnalysisPage() {
     };
   }, []);
 
-  const handleShare = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {}
-  };
-
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -193,9 +186,6 @@ export default function ArticleAnalysisPage() {
               返回
             </button>
             <div className="flex items-center gap-2">
-              <button onClick={handleShare} className="p-2 rounded-lg hover:bg-zinc-100 text-zinc-500 transition-colors" title="复制链接">
-                {copied ? <CheckCircle size={16} weight="bold" className="text-emerald-500" /> : <ShareNetwork size={16} weight="bold" />}
-              </button>
               {isFailed && (
                 <button onClick={() => reprocessMutation.mutate()} disabled={reprocessMutation.isPending} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors">
                   <ArrowsClockwise size={12} weight="bold" className={reprocessMutation.isPending ? "animate-spin" : ""} />
@@ -258,8 +248,10 @@ export default function ArticleAnalysisPage() {
           {isProcessing && (
             <div className="mb-6 p-4 bg-emerald-50/50 rounded-xl border border-emerald-100">
               <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 mb-2">
-                <CircleNotch size={14} weight="bold" className="animate-spin" />
-                {progress?.message || STATE_LABELS[currentState] || "整理中..."}
+                <img src={cdnUrl("/mascot/cha_lens.gif")} alt="" className="w-8 h-8 object-contain" />
+                {isKnowledgeBaseCompiling
+                  ? "内容已整理完成，正在加入知识库..."
+                  : progress?.message || STATE_LABELS[currentState] || "猹正在整理中..."}
               </div>
               <div className="w-full bg-emerald-100 rounded-full h-1.5">
                 <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${currentProgress}%` }} />
@@ -275,13 +267,13 @@ export default function ArticleAnalysisPage() {
                 整理失败
               </div>
               <p className="text-sm text-red-500 ml-6">
-                {progress?.message || article?.status.message || "整理过程中发生未知错误，请稍后重试。"}
+                {sanitizeUserFacingError(progress?.message || article?.status.message, "整理过程中发生未知错误，请稍后重试。")}
               </p>
             </div>
           )}
 
           {/* Tabs */}
-          {isDone && (
+          {canReadAnalysis && (
             <>
               <div className="flex items-center gap-1 mb-4 border-b border-zinc-100 pb-0.5">
                 {TABS.map((tab) => (
@@ -306,8 +298,8 @@ export default function ArticleAnalysisPage() {
 
               {/* Content Tab */}
               {activeTab === "content" && (
-                <div className="prose prose-zinc max-w-none">
-                  <ReactMarkdown>{article?.content ?? ""}</ReactMarkdown>
+                <div className="rounded-xl border border-zinc-100 px-6 py-6">
+                  <ReadableArticleContent content={articleContent} />
                 </div>
               )}
 
@@ -420,9 +412,6 @@ function ArticleMindmapView({ markdown }: { markdown: string }) {
       if (cancelled || !svgRef.current) return;
 
       const transformer = new Transformer();
-      // 禁用 HTML 解析，防止 LLM 生成的内容注入脚本（存储型 XSS）
-      const md = transformer.md as { set?: (opts: { html: boolean }) => void };
-      md?.set?.({ html: false });
       const { root } = transformer.transform(markdown);
 
       if (mmRef.current) {

@@ -33,6 +33,7 @@ class ArticleResponse(BaseModel):
     thumbnail_url: str | None = None
     word_count: int | None = None
     language: str | None = None
+    content: str | None = None
     status: ArticleProgress
     in_wiki: bool = False
     created_at: datetime

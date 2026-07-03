@@ -13,6 +13,7 @@ interface TranslationPanelProps {
   segments: Array<{ start: number; end: number; text: string; speaker?: string }>;
   videoId: string;
   segmentsEn?: (TranscriptSegment | null)[] | null;
+  language?: string;
   isLoading?: boolean;
 }
 
@@ -20,12 +21,17 @@ export default function TranslationPanel({
   segments,
   videoId,
   segmentsEn,
+  language = "zh",
   isLoading = false,
 }: TranslationPanelProps) {
   const activeIndex = useAtomValue(activeSegmentIndexAtom);
   const seekFn = useAtomValue(seekFnAtom);
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  // 翻译方向：zh=英译中（默认），en=中译英
+  const [targetLang, setTargetLang] = useState<"zh" | "en">("zh");
+  // 原文已是目标语言时无需翻译（中文视频+英译中 / 英文视频+中译英）
+  const shouldTranslate = targetLang !== language;
   const [translatedTexts, setTranslatedTexts] = useState<Map<number, string>>(new Map());
   const [translatingIndices, setTranslatingIndices] = useState<Set<number>>(new Set());
 
@@ -74,13 +80,13 @@ export default function TranslationPanel({
   useEffect(() => { translatedRef.current = translatedTexts; }, [translatedTexts]);
   useEffect(() => { translatingRef.current = translatingIndices; }, [translatingIndices]);
 
-  // Initialize from DB-cached translations
+  // Initialize from DB-cached translations — only when direction actually requires translation
   useEffect(() => {
-    if (!segmentsEn) return;
+    if (!shouldTranslate || !segmentsEn) return;
     const map = new Map<number, string>();
     segmentsEn.forEach((seg, i) => { if (seg?.text) map.set(i, seg.text); });
     if (map.size > 0) setTranslatedTexts((prev) => new Map([...prev, ...map]));
-  }, [segmentsEn]);
+  }, [segmentsEn, shouldTranslate]);
 
   // Flush pending viewport indices — batch translate after 300ms debounce
   const flushPending = useCallback(() => {
@@ -95,7 +101,10 @@ export default function TranslationPanel({
       for (let i = 0; i < indices.length; i += BATCH) {
         const batch = indices.slice(i, i + BATCH);
         try {
-          const res = await translateTranscript(videoId, { segment_indices: batch });
+          const res = await translateTranscript(videoId, {
+            segment_indices: batch,
+            target_lang: targetLang,
+          });
           setTranslatedTexts((prev) => {
             const next = new Map(prev);
             for (const [idx, text] of Object.entries(res.translations)) next.set(Number(idx), text);
@@ -109,7 +118,14 @@ export default function TranslationPanel({
         });
       }
     })();
-  }, [videoId]);
+  }, [videoId, targetLang]);
+
+  // 当方向切换时：清空已有译文与进行中状态，让 observer 按新方向重译视口段
+  useEffect(() => {
+    setTranslatedTexts(new Map());
+    setTranslatingIndices(new Set());
+    pendingRef.current.clear();
+  }, [targetLang]);
 
   // IntersectionObserver: observe segments entering viewport for auto-translate
   useEffect(() => {
@@ -117,6 +133,7 @@ export default function TranslationPanel({
 
     const observer = new IntersectionObserver(
       (entries) => {
+        if (!shouldTranslate) return;
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
           const idx = Number((entry.target as HTMLElement).dataset.segIdx);
@@ -135,7 +152,7 @@ export default function TranslationPanel({
       observer.disconnect();
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
-  }, [segments, flushPending]);
+  }, [segments, flushPending, shouldTranslate]);
 
   const query = search.trim().toLowerCase();
   const filteredSegments = query
@@ -183,6 +200,30 @@ export default function TranslationPanel({
                 <X size={11} weight="bold" style={{ color: "#292929" }} />
               </button>
             )}
+          </div>
+          {/* 翻译方向选择器：英译中（默认）/ 中译英 */}
+          <div
+            className="shrink-0 flex items-center rounded-lg p-0.5"
+            style={{ background: "#F5F5F4" }}
+            title="选择翻译方向"
+          >
+            {([["zh", "英译中"], ["en", "中译英"]] as const).map(([lang, label]) => {
+              const isActive = targetLang === lang;
+              return (
+                <button
+                  key={lang}
+                  onClick={() => setTargetLang(lang)}
+                  className={cn(
+                    "px-2 h-7 rounded-md text-[11px] font-semibold transition-all whitespace-nowrap",
+                    isActive
+                      ? "bg-white text-emerald-600 shadow-sm"
+                      : "text-zinc-500 hover:text-zinc-800"
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
         {query && (

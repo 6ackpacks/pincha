@@ -62,11 +62,11 @@ frontend/tsconfig.tsbuildinfo
 # Crash dumps
 *.stackdump
 
-# MCP config (contains API tokens)
-.mcp.json
-
 # Playwright MCP
 .playwright-mcp/
+
+# MCP 本地配置（含 API 密钥，禁止提交）
+.mcp.json
 
 # Playwright E2E
 /frontend/test-results/
@@ -79,3 +79,12 @@ pencil-new.pen
 
 # Celery Beat schedule files
 celerybeat-schedule*
+
+# 临时文件和原始素材
+tmp/
+backend/tmp/
+frontend/tmp/
+frontend/public/.channel-originals/
+
+# 本地草稿/渲染脚本目录（含 node_modules，禁止提交）
+pingcha-intro-cards/

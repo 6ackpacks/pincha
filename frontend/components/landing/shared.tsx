@@ -1,24 +1,48 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion, useMotionValue, useSpring, useInView } from "framer-motion";
 import { ArrowRight, Play } from "@phosphor-icons/react";
 
 /* ── Animation config ── */
 const power2Out = [0.33, 1, 0.68, 1] as const;
+const HERO_POSTER_SRC = "/hero-clips/hero-poster-720.webp";
+const HERO_STANDARD_VIDEO_SOURCES = [
+  { src: "/hero-clips/hero-loop.webm", type: "video/webm" },
+  { src: "/hero-clips/hero-loop.mp4", type: "video/mp4" },
+] as const;
+const HERO_HIGH_VIDEO_SOURCES = [
+  { src: "/hero-clips/hero-loop-720.mp4", type: "video/mp4" },
+] as const;
+const HERO_VIDEO_START_DELAY_MS = 1800;
+const HERO_MEDIA_CLASS = "absolute inset-0 h-full w-full object-cover";
+const HERO_MEDIA_STYLE = {
+  objectPosition: "center 52%",
+  transform: "scale(1.08)",
+} as const;
 
-const fadeBlur = {
-  hidden: { y: 24, opacity: 0, filter: "blur(10px)" },
-  visible: (d: number) => ({
-    y: 0, opacity: 1, filter: "blur(0px)",
-    transition: { duration: 1, ease: power2Out, delay: d },
-  }),
+type HeroVideoSource = {
+  src: string;
+  type: string;
 };
 
-const staggerContainer = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.2 } },
+interface NetworkInformation {
+  saveData?: boolean;
+  effectiveType?: string;
+}
+
+interface NavigatorWithConnection extends Navigator {
+  connection?: NetworkInformation;
+}
+
+const fadeBlur = {
+  hidden: { y: 24, opacity: 0 },
+  visible: (d: number) => ({
+    y: 0, opacity: 1,
+    transition: { duration: 1, ease: power2Out, delay: d },
+  }),
 };
 
 /* ── Magnetic Button ── */
@@ -29,7 +53,7 @@ export function MagneticBtn({ children, className, href }: { children: React.Rea
   const sy = useSpring(y, { stiffness: 150, damping: 15 });
   const ref = useRef<HTMLAnchorElement>(null);
   return (
-    <Link href={href} ref={ref}
+    <Link href={href} ref={ref} prefetch={false}
       onClick={(e) => { if (href.startsWith("#")) { e.preventDefault(); document.querySelector(href)?.scrollIntoView({ behavior: "smooth" }); } }}
       onMouseMove={(e) => { const rect = ref.current?.getBoundingClientRect(); if (!rect) return; x.set((e.clientX - rect.left - rect.width / 2) * 0.15); y.set((e.clientY - rect.top - rect.height / 2) * 0.15); }}
       onMouseLeave={() => { x.set(0); y.set(0); }}>
@@ -41,13 +65,106 @@ export function MagneticBtn({ children, className, href }: { children: React.Rea
   );
 }
 
+function LandingHeroMedia() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [posterLoaded, setPosterLoaded] = useState(false);
+  const [videoSources, setVideoSources] = useState<readonly HeroVideoSource[]>([]);
+  const [videoReady, setVideoReady] = useState(false);
+
+  useEffect(() => {
+    if (!posterLoaded) return;
+
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const connection = (navigator as NavigatorWithConnection).connection;
+    const isConstrainedNetwork = connection?.saveData === true || /(^|-)2g$/.test(connection?.effectiveType ?? "");
+
+    if (prefersReducedMotion || isConstrainedNetwork) return;
+
+    const load = () => {
+      const prefersHighQuality =
+        window.matchMedia("(min-width: 520px)").matches;
+
+      setVideoSources(prefersHighQuality ? HERO_HIGH_VIDEO_SOURCES : HERO_STANDARD_VIDEO_SOURCES);
+    };
+
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState !== "visible") return;
+
+      load();
+    }, HERO_VIDEO_START_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [posterLoaded]);
+
+  useEffect(() => {
+    if (videoSources.length === 0) return;
+
+    window.requestAnimationFrame(() => {
+      videoRef.current?.load();
+    });
+  }, [videoSources]);
+
+  return (
+    <>
+      <Image
+        src={HERO_POSTER_SRC}
+        alt=""
+        aria-hidden="true"
+        fill
+        priority
+        unoptimized
+        fetchPriority="high"
+        sizes="100vw"
+        className={HERO_MEDIA_CLASS}
+        style={HERO_MEDIA_STYLE}
+        onLoad={() => setPosterLoaded(true)}
+      />
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="none"
+        poster={HERO_POSTER_SRC}
+        aria-hidden="true"
+        onCanPlay={() => setVideoReady(true)}
+        className={`${HERO_MEDIA_CLASS} transition-opacity duration-700 ${
+          videoReady ? "opacity-100" : "opacity-0"
+        }`}
+        style={HERO_MEDIA_STYLE}
+      >
+        {videoSources.length > 0 &&
+          videoSources.map((source) => (
+            <source
+              key={source.src}
+              src={source.src}
+              type={source.type}
+            />
+          ))}
+      </video>
+      {!videoReady && (
+        <noscript>
+          <img
+            src={HERO_POSTER_SRC}
+            alt=""
+            aria-hidden="true"
+            className={HERO_MEDIA_CLASS}
+            style={HERO_MEDIA_STYLE}
+          />
+        </noscript>
+      )}
+    </>
+  );
+}
+
 /* ── Scroll-triggered section wrapper ── */
 export function RevealSection({ children, className, delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
   const ref = useRef(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
   return (
     <motion.div ref={ref} initial="hidden" animate={inView ? "visible" : "hidden"}
-      variants={fadeBlur} custom={delay} className={`will-change-[filter,transform] ${className ?? ""}`}>
+      variants={fadeBlur} custom={delay} className={`will-change-transform ${className ?? ""}`}>
       {children}
     </motion.div>
   );
@@ -81,12 +198,31 @@ export function GlowOrb({ color = "rgba(99,102,241,0.12)", size = 400, className
 /* ── Animated Divider ── */
 export function AnimatedDivider({ className }: { className?: string }) {
   return (
-    <motion.div
-      className={`h-[1px] w-full ${className ?? ""}`}
-      style={{ backgroundSize: "200% 100%", backgroundImage: "linear-gradient(90deg, transparent, rgba(255,255,255,0.15), rgba(255,255,255,0.3), rgba(255,255,255,0.15), transparent)" }}
-      animate={{ backgroundPosition: ["200% 0%", "-200% 0%"] }}
-      transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-    />
+    <div className={`h-[1px] w-full overflow-hidden ${className ?? ""}`}>
+      <motion.div
+        className="h-full w-[200%] will-change-transform"
+        style={{ backgroundImage: "linear-gradient(90deg, transparent, rgba(20,184,116,0.18), rgba(20,184,116,0.34), rgba(20,184,116,0.18), transparent)" }}
+        animate={{ x: ["0%", "-50%"] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+      />
+    </div>
+  );
+}
+
+/* ── Browser Frame ── */
+export function BrowserFrame({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`relative rounded-xl border border-white/[0.08] bg-[#0a0a0d] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5),0_0_80px_-20px_rgba(52,211,153,0.08)] overflow-hidden ${className ?? ""}`}>
+      <div className="flex items-center gap-1.5 px-4 py-3 border-b border-white/[0.06]">
+        <div className="w-2.5 h-2.5 rounded-full bg-white/[0.12]" />
+        <div className="w-2.5 h-2.5 rounded-full bg-white/[0.12]" />
+        <div className="w-2.5 h-2.5 rounded-full bg-white/[0.12]" />
+        <div className="ml-3 flex-1 h-5 rounded-md bg-white/[0.04] max-w-[280px]" />
+      </div>
+      <div className="relative">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -98,46 +234,43 @@ interface LandingHeroSectionProps {
 export function LandingHeroSection({ heroRef }: LandingHeroSectionProps) {
   return (
     <section ref={heroRef} className="relative min-h-[100dvh] flex items-center justify-center overflow-hidden">
-      <video autoPlay muted loop playsInline aria-hidden="true"
-        className="absolute inset-0 w-full h-full object-cover"
-        poster="/hero-clips/clip-1.jpg">
-        <source src="/hero-clips/hero-loop.mp4" type="video/mp4" />
-      </video>
-      <div className="absolute inset-0 bg-gradient-to-b from-[#141418]/70 via-[#141418]/50 to-[#141418]" />
+      <LandingHeroMedia />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/[0.04] via-white/[0.12] to-[#f7fbf7]/45" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(255,255,255,0.04),rgba(247,251,247,0.22)_76%)]" />
 
-      <motion.div initial="hidden" animate="visible" variants={staggerContainer}
-        className="relative z-10 flex flex-col items-center text-center px-[5%] pt-20">
-        <motion.p variants={fadeBlur} custom={0}
-          className="text-xs uppercase tracking-[0.15em] text-white/45 mb-6">
-          AI Knowledge Workspace
-        </motion.p>
-        <motion.h1 variants={fadeBlur} custom={0.2}
-          className="max-w-[900px] text-[clamp(3rem,8vw,6.5rem)] font-normal leading-[0.9] tracking-[-0.03em]"
-          style={{ textShadow: "0 0 1px rgba(255,255,255,0.3)" }}>
-          Where Content
-          <br />
-          <span className="text-white/80">Becomes Knowledge</span>
-        </motion.h1>
-        <motion.p variants={fadeBlur} custom={0.4}
-          className="mt-8 text-[16px] leading-relaxed text-white/50 max-w-[480px]">
-          让信息有归处。品猹整理视频、播客、文章与每日线索，并汇入可检索、可追问的个人知识库。
-        </motion.p>
-        <motion.div variants={fadeBlur} custom={0.6} className="mt-10 flex items-center gap-4">
-          <MagneticBtn href="/login" className="px-6 py-3 text-[14px] font-medium bg-white text-[#141418] rounded hover:bg-zinc-200 gap-2">
+      <div className="relative z-10 flex flex-col items-center px-[5%] pt-16 text-center sm:pt-20">
+        <p className="mb-6 inline-flex animate-[landingHeroIn_520ms_ease-out_80ms_both] items-center rounded-full border border-emerald-950/10 bg-white/82 px-3.5 py-1.5 text-[12px] font-semibold text-[#0f1f17] shadow-[0_10px_30px_-22px_rgba(0,0,0,0.55)] backdrop-blur-md sm:mb-7">
+          Video · Podcast · Article → Knowledge
+        </p>
+        <h1
+          className="max-w-[1120px] animate-[landingHeroIn_580ms_ease-out_160ms_both] text-[clamp(2.75rem,5.2vw,5.75rem)] leading-[1.03] tracking-[-0.02em] text-[#0f1f17]"
+          style={{ fontFamily: "var(--font-instrument-serif), Georgia, serif" }}>
+          Watch Less. <span className="text-[#0f1f17] italic">Know More.</span>
+        </h1>
+        <div
+          className="mt-6 max-w-[720px] animate-[landingHeroIn_580ms_ease-out_240ms_both] rounded-[30px] bg-white/46 px-5 py-4 text-center text-[#0f1f17] shadow-[0_18px_48px_-42px_rgba(15,23,42,0.65)] backdrop-blur-[2px] sm:px-7"
+          style={{ fontFamily: "STKaiti, KaiTi, Kaiti SC, Songti SC, serif" }}>
+          <p className="text-[clamp(1rem,1.35vw,1.35rem)] font-semibold leading-[1.35]">
+            让信息有归处
+          </p>
+          <p className="mt-2 text-[clamp(0.88rem,1vw,1.05rem)] leading-[1.75] text-[#24382f]/82">
+            整理视频、播客、文章与每日线索，汇入所有的个人知识库。
+          </p>
+        </div>
+        <div className="mt-8 flex animate-[landingHeroIn_580ms_ease-out_320ms_both] flex-col items-center gap-3 sm:flex-row sm:gap-4">
+          <MagneticBtn href="/login" className="px-6 py-3 text-[14px] font-semibold bg-[#166534] text-white rounded-full hover:bg-[#14532d] hover:shadow-[0_18px_40px_-24px_rgba(5,150,105,0.75)] gap-2 transition-all duration-200">
             开始品读 <ArrowRight size={14} weight="bold" />
           </MagneticBtn>
-          <MagneticBtn href="#features" className="px-6 py-3 text-[14px] font-medium bg-transparent text-white border border-white/20 rounded hover:border-white/40 gap-2">
+          <MagneticBtn href="#features" className="px-6 py-3 text-[14px] font-semibold bg-white/78 text-[#0f1f17] border border-emerald-950/10 rounded-full hover:border-[#166534]/25 hover:bg-white gap-2 transition-all duration-200">
             <Play size={14} weight="bold" /> 看看如何工作
           </MagneticBtn>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
 
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.5 }}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
-        <span className="text-[10px] uppercase tracking-[0.2em] text-white/25">Scroll</span>
-        <motion.div animate={{ y: [0, 6, 0] }} transition={{ duration: 1.5, repeat: Infinity }}
-          className="w-[1px] h-6 bg-gradient-to-b from-white/30 to-transparent" />
-      </motion.div>
+      <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2 animate-[landingHeroFade_600ms_ease-out_900ms_both] flex-col items-center gap-2">
+        <span className="text-[10px] uppercase tracking-[0.2em] text-[#0f1f17]/45">Scroll</span>
+        <div className="h-6 w-[1px] animate-[landingScrollHint_1.5s_ease-in-out_infinite] bg-gradient-to-b from-[#0f1f17]/35 to-transparent" />
+      </div>
     </section>
   );
 }

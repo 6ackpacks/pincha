@@ -73,7 +73,7 @@ export default function UsersPage() {
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
                       {u.avatar_url ? (
-                        <img src={u.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover" />
+                        <img src={u.avatar_url} alt="" loading="lazy" decoding="async" className="w-6 h-6 rounded-full object-cover" />
                       ) : (
                         <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 text-[10px] font-bold">
                           {(u.nickname || u.email || "?")[0].toUpperCase()}

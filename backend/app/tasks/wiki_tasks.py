@@ -233,7 +233,7 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
                     {
                         "content": content,
                         "title": title,
-                        "status": json.dumps({"state": "compiling", "progress": 50, "message": "正在编译知识库"}),
+                        "status": json.dumps({"state": "compiling", "progress": 50, "message": "正在加入知识库"}),
                         "aid": article_id,
                     },
                 )
@@ -248,12 +248,12 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
                         WHERE id = :aid
                     """),
                     {
-                        "status": json.dumps({"state": "failed", "progress": 0, "message": f"抓取失败: {exc}"}),
+                        "status": json.dumps({"state": "failed", "progress": 0, "message": "原帖已删除或暂时不可访问"}),
                         "aid": article_id,
                     },
                 )
                 session.commit()
-            return {"error": str(exc)}
+            return {"error": "source_unavailable"}
 
     if not content:
         logger.error("Article %s has no content", article_id)
@@ -265,7 +265,7 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
                     WHERE id = :aid
                 """),
                 {
-                    "status": json.dumps({"state": "failed", "progress": 0, "message": "内容为空，无法编译"}),
+                    "status": json.dumps({"state": "failed", "progress": 0, "message": "未提取到可用正文，无法整理"}),
                     "aid": article_id,
                 },
             )
@@ -285,7 +285,7 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
                 WHERE id = :aid AND status->>'state' NOT IN ('compiling', 'done', 'failed')
             """),
             {
-                "status": json.dumps({"state": "compiling", "progress": 30, "message": "正在编译知识库"}),
+                "status": json.dumps({"state": "compiling", "progress": 30, "message": "正在加入知识库"}),
                 "aid": article_id,
             },
         )
@@ -332,7 +332,7 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
         return result
     except Exception as exc:
         logger.error("Article ingest failed: article=%s error=%s", article_id, exc)
-        _set_compile_progress(article_id, "failed", 0, f"编译失败: {exc}")
+        _set_compile_progress(article_id, "failed", 0, "知识库整理失败，请稍后重试")
         # Mark article as failed so UI can surface the error
         try:
             with Session(engine) as session:
@@ -343,7 +343,7 @@ def ingest_article(article_id: str, user_id: str, kb_id: str | None = None) -> d
                         WHERE id = :aid
                     """),
                     {
-                        "status": json.dumps({"state": "failed", "progress": 0, "message": f"编译失败: {exc}"}),
+                        "status": json.dumps({"state": "failed", "progress": 0, "message": "知识库整理失败，请稍后重试"}),
                         "aid": article_id,
                     },
                 )

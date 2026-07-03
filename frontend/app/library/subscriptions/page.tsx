@@ -83,6 +83,7 @@ export default function LibrarySubscriptionsPage() {
     }) => subscribeCurateV2Channel(channelId, emailEnabled, emailAddress),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setSubscribeTarget(null);
       setEmailEnabled(false);
       setEmailAddress("");
@@ -93,6 +94,7 @@ export default function LibrarySubscriptionsPage() {
     mutationFn: (channelId: number) => unsubscribeCurateV2Channel(channelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setUnsubscribeTarget(null);
     },
   });

@@ -1,19 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { CircleNotch } from "@phosphor-icons/react";
 import { cn, stripMarkdown } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import { getCurateV2ChannelPicks, type CurateV2Channel } from "@/lib/api";
 
 const CHANNEL_IMAGES = [
-  "/channel-1-ai-product-launch.png",
-  "/channel-2-ai-tutorial.png",
-  "/channel-3-ai-product-insight.png",
-  "/channel-4-ai-deep-read.png",
-  "/channel-5-ai-daily-brief.png",
-];
+  "/channel-1-ai-product-launch.webp",
+  "/channel-2-ai-tutorial.webp",
+  "/channel-3-ai-product-insight.webp",
+  "/channel-4-ai-deep-read.webp",
+  "/channel-5-ai-daily-brief.webp",
+].map(cdnUrl);
 
 export function ChannelCard({ cat, index, isExpanded, onHover, onLeave }: { cat: CurateV2Channel; index: number; isExpanded: boolean; onHover: () => void; onLeave: () => void }) {
   const cardImage = CHANNEL_IMAGES[index % CHANNEL_IMAGES.length];
@@ -32,39 +34,25 @@ export function ChannelCard({ cat, index, isExpanded, onHover, onLeave }: { cat:
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.05 }}
-      className="min-w-0 relative"
+      className="min-w-0"
       style={{ flex: isExpanded ? 3 : 1, transition: "flex 0.35s cubic-bezier(0.4, 0, 0.2, 1)" }}
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
     >
       <Link href={`/curate/${cat.slug}`} className="block h-full">
-        <div className={cn(
-          "h-full rounded-xl overflow-hidden flex relative transition-all duration-300",
-          isExpanded ? "shadow-xl shadow-black/15" : "hover:shadow-lg hover:shadow-black/10"
-        )}>
-          {/* Character image area */}
-          <div className={cn(
-            "relative transition-all duration-300 overflow-hidden shrink-0",
-            isExpanded ? "w-[150px]" : "w-full"
-          )}>
-            <img
-              src={cardImage}
-              alt={cat.name}
-              className={cn(
-                "absolute inset-0 w-full h-full object-cover transition-all duration-300",
-                isExpanded ? "object-[70%_center]" : "object-center"
-              )}
-            />
-            {!isExpanded && (
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent flex flex-col justify-end p-4">
-                <p className="text-white font-bold text-sm leading-tight drop-shadow-sm">{cat.name}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Right panel: info + feed (only when expanded) */}
-          {isExpanded && (
-            <div className="flex-1 bg-white border-l border-zinc-100 py-3 px-4 overflow-hidden flex flex-col">
+        {isExpanded ? (
+          <div className="flex h-full overflow-hidden rounded-2xl shadow-lg">
+            <div className="relative w-[160px] shrink-0 overflow-hidden">
+              <Image
+                src={cardImage}
+                alt={cat.name}
+                fill
+                className="object-cover"
+                sizes="160px"
+                unoptimized
+              />
+            </div>
+            <div className="flex-1 bg-white py-3 px-4 overflow-hidden flex flex-col">
               <div className="mb-2">
                 <p className="text-sm font-bold text-zinc-800">{cat.name}</p>
                 {cat.description && (
@@ -99,8 +87,23 @@ export function ChannelCard({ cat, index, isExpanded, onHover, onLeave }: { cat:
                 查看全部 →
               </span>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className={cn(
+            "relative aspect-[3/2] overflow-hidden rounded-2xl",
+            "transition-all duration-200 ease-out",
+            "hover:scale-[1.03] hover:brightness-110 hover:shadow-lg"
+          )}>
+            <Image
+              src={cardImage}
+              alt={cat.name}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 50vw, 20vw"
+              unoptimized
+            />
+          </div>
+        )}
       </Link>
     </motion.div>
   );

@@ -347,6 +347,21 @@ def process_video(video_id: str) -> dict:
         _step(video_id, VideoState.DONE, 100, "处理完成")
         _delete_heartbeat(video_id)
 
+        # 持久化「解析完成」通知：给所有拥有该 video 的 user 各写一条
+        try:
+            from app.services.curate_v2.notifier import (
+                create_organize_done_notifications_for_video,
+            )
+            with get_sync_engine().connect() as _nconn:
+                _title_row = _nconn.execute(
+                    _text("SELECT title FROM videos WHERE id = :vid"),
+                    {"vid": video_id},
+                ).fetchone()
+            _video_title = _title_row[0] if _title_row and _title_row[0] else None
+            create_organize_done_notifications_for_video(video_id, _video_title)
+        except Exception as _ne:
+            logger.warning("[pipeline:%s] organize_done notification failed: %s", video_id, _ne)
+
         if _sentry_txn:
             _sentry_txn.set_status("ok")
 

@@ -73,6 +73,8 @@ class DailyPickResponse(BaseModel):
     score: float | None = None
     is_official: bool = False
     article_id: uuid.UUID | None = None
+    article_status: dict | None = None
+    article_in_wiki: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -98,7 +100,11 @@ class FeedResponse(BaseModel):
 class NotificationResponse(BaseModel):
     id: int
     user_id: uuid.UUID
-    pick_id: int
+    pick_id: int | None = None
+    notif_type: str = "pick"
+    title: str | None = None
+    body: str | None = None
+    action_url: str | None = None
     is_read: bool
     created_at: datetime
     pick: DailyPickResponse | None = None

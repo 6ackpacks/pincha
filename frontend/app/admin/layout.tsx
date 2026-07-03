@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   TrendUp,
 } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMe, logout, type CurrentUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +30,7 @@ type AuthState = "loading" | "forbidden" | "ok";
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [authState, setAuthState] = useState<AuthState>("loading");
 
   const { data: me, isLoading, isError } = useQuery<CurrentUser>({
@@ -131,8 +132,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </span>
             <button
               onClick={async () => {
-                await logout();
-                router.replace("/login");
+                try {
+                  await logout();
+                } catch {
+                  // keep going
+                } finally {
+                  queryClient.removeQueries({ queryKey: ["me"], exact: true });
+                  queryClient.removeQueries({ queryKey: ["sessions"], exact: true });
+                  window.location.replace("/login");
+                }
               }}
               title="退出登录"
               className="p-1 rounded text-zinc-500 hover:text-zinc-200 transition-colors"

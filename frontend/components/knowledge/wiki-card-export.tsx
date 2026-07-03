@@ -3,6 +3,7 @@
 import React, { useRef } from "react";
 import { ImageSquare, CircleNotch } from "@phosphor-icons/react";
 import { useExportCard } from "@/lib/use-export-card";
+import { cdnUrl } from "@/lib/cdn";
 
 interface WikiCardExportProps {
   title: string;
@@ -196,7 +197,7 @@ export function WikiCardExport({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo-sm.png"
+              src={cdnUrl("/logo-sm.png")}
               alt="品猹"
               style={{ width: 20, height: 20, borderRadius: 4 }}
             />

@@ -31,7 +31,9 @@ export function useWikiCompile(
     onSuccess: (data) => {
       setShowKBDialog(false);
       if (data.already_ingested) {
-        queryClient.invalidateQueries({ queryKey: ["video", videoId] });
+        queryClient.setQueryData<VideoResponse>(["video", videoId], (old) =>
+          old ? { ...old, in_wiki: true } : old
+        );
         return;
       }
       setWikiCompiling(true);
@@ -66,10 +68,13 @@ export function useWikiCompile(
       setWikiCompiling(false);
       if (wikiPollRef.current) clearInterval(wikiPollRef.current);
       if (wikiTimeoutRef.current) clearTimeout(wikiTimeoutRef.current);
+      queryClient.setQueryData<VideoResponse>(["video", videoId], (old) =>
+        old ? { ...old, in_wiki: true } : old
+      );
       queryClient.invalidateQueries({ queryKey: ["wiki-graph"] });
       queryClient.invalidateQueries({ queryKey: ["wiki-pages"] });
     }
-  }, [video?.in_wiki, wikiCompiling, queryClient]);
+  }, [video?.in_wiki, wikiCompiling, queryClient, videoId]);
 
   // Cleanup wiki poll and timeout on unmount
   useEffect(() => {

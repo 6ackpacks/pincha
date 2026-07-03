@@ -23,8 +23,8 @@ export const MOCK_USER = {
 // The session cookie name used by the backend
 const SESSION_COOKIE_NAME = 'session'
 
-// A fake JWT token for testing (the backend won't validate it when mocked)
-const MOCK_SESSION_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXItMDAxIiwiZXhwIjo5OTk5OTk5OTk5fQ.mock-signature'
+// A fake session token for testing (the backend won't validate it when mocked).
+const MOCK_SESSION_TOKEN = 'mock-session-token-for-e2e'
 
 type AuthFixtures = {
   authedPage: Page

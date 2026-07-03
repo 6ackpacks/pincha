@@ -34,9 +34,7 @@ def render_daily_digest_email(
     Returns:
         Complete HTML string ready to send as email body.
     """
-    if not frontend_url:
-        frontend_url = settings.FRONTEND_URL
-
+    frontend_url = frontend_url or settings.FRONTEND_URL
     channels_html = _render_channels(channels_picks)
     curate_url = f"{html.escape(frontend_url, quote=True)}/curate"
 

@@ -45,10 +45,20 @@ export function VideoPageError({ message, onBack }: { message: string; onBack: (
     <div className="flex min-h-screen bg-[#FAFAFA]">
       <Sidebar />
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-center p-8 bg-white rounded-2xl border border-red-100 shadow-sm max-w-sm">
-          <p className="text-red-500 text-lg font-bold">无法访问视频</p>
-          <p className="text-zinc-500 mt-2 text-sm">{message}</p>
-          <button onClick={onBack} className="mt-6 px-4 py-2 bg-zinc-100 font-bold text-zinc-700 rounded-lg hover:bg-zinc-200">返回</button>
+        <div className="text-center p-10 bg-white rounded-2xl border border-zinc-100 shadow-sm max-w-sm">
+          <svg viewBox="0 0 120 120" className="w-24 h-24 mx-auto mb-5" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="60" cy="60" r="56" fill="#F4F4F5" />
+            <rect x="30" y="38" width="60" height="44" rx="6" fill="#E4E4E7" />
+            <rect x="34" y="42" width="52" height="32" rx="3" fill="#FAFAFA" />
+            <path d="M55 54 L65 64 M65 54 L55 64" stroke="#A1A1AA" strokeWidth="2.5" strokeLinecap="round" />
+            <rect x="50" y="82" width="20" height="4" rx="2" fill="#E4E4E7" />
+            <rect x="44" y="86" width="32" height="3" rx="1.5" fill="#E4E4E7" />
+          </svg>
+          <p className="text-zinc-900 text-lg font-bold">内容暂时无法访问</p>
+          <p className="text-zinc-400 mt-2 text-sm leading-relaxed">{message || "该内容不存在或已被删除"}</p>
+          <button onClick={onBack} className="mt-6 px-6 py-2.5 bg-zinc-900 font-bold text-white text-sm rounded-xl hover:bg-zinc-700 transition-colors">
+            返回列表
+          </button>
         </div>
       </div>
     </div>
@@ -142,7 +152,7 @@ export function ShareCardDialog({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="bg-white rounded-2xl w-[440px] max-h-[90vh] shadow-xl border border-zinc-200 overflow-hidden"
+            className="bg-white rounded-2xl w-[min(440px,calc(100vw-24px))] max-h-[90vh] shadow-xl border border-zinc-200 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <ShareCard video={video} videoId={videoId} onClose={onClose} />

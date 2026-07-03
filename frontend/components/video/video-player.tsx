@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { currentTimeAtom, seekFnAtom } from "@/atoms/player";
+import { youtubeThumbnailFallback } from "@/lib/api/client";
 
 interface VideoPlayerProps {
   url: string;
@@ -320,6 +321,7 @@ export function VideoPlayer({
               alt={title || "Video thumbnail"}
               loading="eager"
               fetchPriority="high"
+              onError={youtubeThumbnailFallback}
               className="absolute inset-0 w-full h-full object-cover opacity-60"
             />
             <div className="relative z-10 flex flex-col items-center gap-3 text-center">

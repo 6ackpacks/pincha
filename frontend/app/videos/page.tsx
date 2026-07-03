@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useTransition } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,7 +13,7 @@ import { getArticlesList, deleteArticleAnalysis, type ArticleAnalysisResponse } 
 import { proxyThumbnail } from "@/lib/api/client";
 import { removeFromQueueAtom } from "@/atoms/queue";
 import { cn, stripMarkdown } from "@/lib/utils";
-import { STATE_LABELS } from "@/lib/constants";
+import { STATE_LABELS, UI_LABELS } from "@/lib/constants";
 import {
   Play,
   Plus,
@@ -28,12 +29,13 @@ import {
   ArrowLeft,
   FileText,
   Microphone,
+  YoutubeLogo,
 } from "@phosphor-icons/react";
 
 const FILTERS = [
-  { key: "all", label: "全部" },
-  { key: "processing", label: "整理中" },
-  { key: "failed", label: "整理失败" },
+  { key: "done", label: "已解析" },
+  { key: "processing", label: UI_LABELS.PROCESSING },
+  { key: "failed", label: UI_LABELS.PROCESSING_FAILED },
 ];
 
 const TYPE_TABS = [
@@ -167,7 +169,16 @@ function VideoCardItem({ v, index, confirmingId, setConfirmingId, deleteMutation
         <div className="h-44 flex items-center justify-center relative bg-zinc-100 overflow-hidden shrink-0">
           {v.thumbnail_url && thumbFallback.get(v.id) !== "failed" ? (
             <>
-              <img src={thumbFallback.get(v.id) === "direct" ? v.thumbnail_url : (proxyThumbnail(v.thumbnail_url) ?? v.thumbnail_url)} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading={index === 0 ? "eager" : "lazy"} onError={() => { setThumbFallback((prev) => { const next = new Map(prev); next.set(v.id, prev.get(v.id) === "direct" ? "failed" : "direct"); return next; }); }} />
+              <Image
+                src={thumbFallback.get(v.id) === "direct" ? v.thumbnail_url : (proxyThumbnail(v.thumbnail_url) ?? v.thumbnail_url)}
+                alt={v.title || ""}
+                fill
+                className="object-cover transition-transform duration-700 group-hover:scale-105"
+                sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                unoptimized
+                loading={index === 0 ? "eager" : "lazy"}
+                onError={() => { setThumbFallback((prev) => { const next = new Map(prev); next.set(v.id, prev.get(v.id) === "direct" ? "failed" : "direct"); return next; }); }}
+              />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/0" />
             </>
           ) : (
@@ -177,14 +188,14 @@ function VideoCardItem({ v, index, confirmingId, setConfirmingId, deleteMutation
           {isProcessing && (
             <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
               <CircleNotch size={28} weight="bold" className="text-emerald-400 animate-spin" />
-              <span className="text-sm font-bold text-white">{v.status.message || "整理中"}</span>
+              <span className="text-sm font-bold text-white">{v.status.message || UI_LABELS.PROCESSING}</span>
               {v.status.progress > 0 && <div className="w-32 h-2 rounded-full bg-white/20 overflow-hidden"><motion.div className="h-full bg-emerald-500 rounded-full" animate={{ width: `${v.status.progress}%` }} transition={{ duration: 0.5 }} /></div>}
             </div>
           )}
           {isFailed && (
             <div className="absolute inset-0 bg-red-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2">
-              <Warning size={28} weight="bold" className="text-red-400" /><span className="text-sm font-bold text-white">整理失败</span>
-              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); reprocessMutation.mutate(v.id); }} className="mt-2 px-4 py-2 rounded-lg text-xs font-bold text-white bg-white/20 hover:bg-white/30 transition-colors">重新整理</button>
+              <Warning size={28} weight="bold" className="text-red-400" /><span className="text-sm font-bold text-white">{UI_LABELS.PROCESSING_FAILED}</span>
+              <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); reprocessMutation.mutate(v.id); }} className="mt-2 px-4 py-2 rounded-lg text-xs font-bold text-white bg-white/20 hover:bg-white/30 transition-colors">{UI_LABELS.REPROCESS}</button>
             </div>
           )}
         </div>
@@ -192,7 +203,13 @@ function VideoCardItem({ v, index, confirmingId, setConfirmingId, deleteMutation
           <div className="text-[15px] font-bold text-zinc-900 leading-snug mb-4 line-clamp-2 group-hover:text-emerald-600 transition-colors">{stripMarkdown(v.title) || "无标题视频"}</div>
           <div className="flex items-center justify-between mt-auto">
             <div className="flex items-center gap-2">
-              <span className={cn("w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-white", v.platform === "youtube" ? "bg-red-500" : "bg-purple-500")}>{v.platform === "youtube" ? "Y" : "P"}</span>
+              {v.platform === "youtube" ? (
+                <span className="w-5 h-5 rounded flex items-center justify-center bg-red-500">
+                  <YoutubeLogo size={11} weight="fill" className="text-white" />
+                </span>
+              ) : (
+                <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold text-white bg-purple-500">P</span>
+              )}
               <span className="text-xs font-semibold text-zinc-500">{v.platform === "youtube" ? "YouTube" : "播客"}</span>
             </div>
             <StatusBadge state={v.status.state} />
@@ -216,7 +233,7 @@ function ArticleCardItem({ article, confirmingId, setConfirmingId, deleteArticle
       <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmingId(isConfirming ? null : `article-${article.id}`); }} className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-zinc-900/60 backdrop-blur-md text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-500 transition-all duration-200" title="删除文章"><Trash size={14} weight="bold" /></button>
       <div className="rounded-xl overflow-hidden bg-white border border-zinc-200 cursor-pointer h-full flex flex-col spring-hover hover:border-emerald-300 hover:shadow-[0_4px_24px_-4px_rgba(52,211,153,0.12)] hover:-translate-y-1" onClick={() => { if (!isConfirming) router.push(`/articles/${article.id}`); }}>
         <div className="h-28 flex items-center justify-center relative bg-gradient-to-br from-zinc-50 to-zinc-100 overflow-hidden shrink-0">
-          {isProcessing && <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2"><CircleNotch size={24} weight="bold" className="text-emerald-400 animate-spin" /><span className="text-xs font-bold text-white">{article.status?.message || "整理中"}</span></div>}
+          {isProcessing && <div className="absolute inset-0 bg-zinc-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2"><CircleNotch size={24} weight="bold" className="text-emerald-400 animate-spin" /><span className="text-xs font-bold text-white">{article.status?.message || UI_LABELS.PROCESSING}</span></div>}
           {isFailed && <div className="absolute inset-0 bg-red-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2"><Warning size={24} weight="bold" className="text-red-400" /><span className="text-xs font-bold text-white">整理失败</span></div>}
           {!isProcessing && !isFailed && <FileText size={32} weight="light" className="text-zinc-300" />}
         </div>
@@ -234,7 +251,7 @@ function ArticleCardItem({ article, confirmingId, setConfirmingId, deleteArticle
 }
 
 export default function VideosPage() {
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("done");
   const [typeTab, setTypeTab] = useState("all");
   const [isPending, startTransition] = useTransition();
   const [search, setSearch] = useState("");
@@ -332,9 +349,9 @@ export default function VideosPage() {
   const articles: ArticleAnalysisResponse[] = articlesData ?? [];
 
   const filtered = videos.filter((v) => {
-    const statusMatch = filter === "all" ||
-      (filter === "failed" && v.status.state === "failed") ||
-      (filter === "processing" && v.status.state !== "done" && v.status.state !== "failed");
+    const statusMatch = filter === "done" ? v.status.state === "done" :
+      filter === "failed" ? v.status.state === "failed" :
+      filter === "processing" ? (v.status.state !== "done" && v.status.state !== "failed") : true;
     const typeMatch = typeTab === "all" ||
       (typeTab === "video" && v.platform !== "podcast") ||
       (typeTab === "podcast" && v.platform === "podcast");
@@ -342,9 +359,9 @@ export default function VideosPage() {
   });
 
   const filteredArticles = (typeTab === "all" || typeTab === "article") ? articles.filter((a) => {
-    return filter === "all" ||
-      (filter === "failed" && a.status?.state === "failed") ||
-      (filter === "processing" && a.status?.state !== "done" && a.status?.state !== "failed");
+    return filter === "done" ? a.status?.state === "done" :
+      filter === "failed" ? a.status?.state === "failed" :
+      filter === "processing" ? (a.status?.state !== "done" && a.status?.state !== "failed") : true;
   }) : [];
 
   const videoItems = filtered.filter((v) => v.platform !== "podcast");
@@ -391,9 +408,8 @@ export default function VideosPage() {
                 </>
               ) : (
                 <>
-                  <span>全部 <span className="text-zinc-900 font-bold">{totalCount}</span></span>
-                  <span>已完成 <span className="text-emerald-600 font-bold">{doneCount}</span></span>
-                  <span>整理中 <span className="text-amber-500 font-bold">{processingCount}</span></span>
+                  <span>已解析 <span className="text-zinc-900 font-bold">{doneCount}</span></span>
+                  <span>{UI_LABELS.PROCESSING} <span className="text-amber-500 font-bold">{processingCount}</span></span>
                 </>
               )}
             </p>
@@ -479,23 +495,41 @@ export default function VideosPage() {
           <>
             {/* Videos + Podcasts */}
             {(typeTab === "all" || typeTab === "video" || typeTab === "podcast") && filtered.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-8">
-                <AnimatePresence mode="popLayout">
-                  {filtered.map((v, i) => (
-                    <VideoCardItem key={v.id} v={v} index={i} confirmingId={confirmingId} setConfirmingId={setConfirmingId} deleteMutation={deleteMutation} reprocessMutation={reprocessMutation} thumbFallback={thumbFallback} setThumbFallback={setThumbFallback} router={router} />
-                  ))}
-                </AnimatePresence>
+              <div className="mb-8">
+                {typeTab === "all" && (
+                  <div className="flex items-center gap-2 mb-4">
+                    <Play size={16} weight="bold" className="text-red-500" />
+                    <h2 className="text-sm font-bold text-zinc-700">视频 · 播客</h2>
+                    <span className="text-xs text-zinc-400">{filtered.length}</span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  <AnimatePresence mode="popLayout">
+                    {filtered.map((v, i) => (
+                      <VideoCardItem key={v.id} v={v} index={i} confirmingId={confirmingId} setConfirmingId={setConfirmingId} deleteMutation={deleteMutation} reprocessMutation={reprocessMutation} thumbFallback={thumbFallback} setThumbFallback={setThumbFallback} router={router} />
+                    ))}
+                  </AnimatePresence>
+                </div>
               </div>
             )}
 
             {/* Articles */}
             {filteredArticles.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-8">
-                <AnimatePresence mode="popLayout">
-                  {filteredArticles.map((article) => (
-                    <ArticleCardItem key={article.id} article={article} confirmingId={confirmingId} setConfirmingId={setConfirmingId} deleteArticleMutation={deleteArticleMutation} router={router} />
-                  ))}
-                </AnimatePresence>
+              <div className="mb-8">
+                {typeTab === "all" && (
+                  <div className="flex items-center gap-2 mb-4">
+                    <FileText size={16} weight="bold" className="text-amber-500" />
+                    <h2 className="text-sm font-bold text-zinc-700">文章</h2>
+                    <span className="text-xs text-zinc-400">{filteredArticles.length}</span>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  <AnimatePresence mode="popLayout">
+                    {filteredArticles.map((article) => (
+                      <ArticleCardItem key={article.id} article={article} confirmingId={confirmingId} setConfirmingId={setConfirmingId} deleteArticleMutation={deleteArticleMutation} router={router} />
+                    ))}
+                  </AnimatePresence>
+                </div>
               </div>
             )}
 
@@ -503,7 +537,7 @@ export default function VideosPage() {
             {filtered.length === 0 && filteredArticles.length === 0 && (
               <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50">
                 <VideoCamera size={32} weight="light" className="text-zinc-300 mb-3" />
-                <p className="text-sm text-zinc-500">{filter === "all" && typeTab === "all" ? "还没有品读记录" : "没有匹配的记录"}</p>
+                <p className="text-sm text-zinc-500">{filter === "done" && typeTab === "all" ? "还没有品读记录" : "没有匹配的记录"}</p>
               </div>
             )}
           </>

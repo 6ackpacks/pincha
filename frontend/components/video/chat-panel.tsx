@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import { PaperPlaneTilt, CircleNotch, Sparkle, Trash } from "@phosphor-icons/react";
 import { streamVideoAsk, getChatHistory, saveChatMessages, clearChatHistory } from "@/lib/api/videos";
 import { cn } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 
 interface Message {
   id: string;
@@ -28,11 +29,16 @@ const EXAMPLE_QUESTIONS = [
 
 function TypingIndicator() {
   return (
-    <span className="inline-flex items-center gap-[3px] py-1">
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_infinite]" />
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.15s_infinite]" />
-      <span className="w-[5px] h-[5px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.3s_infinite]" />
-    </span>
+    <div className="flex items-end gap-3 py-2">
+      <img src={cdnUrl("/mascot/loading.gif")} alt="" className="w-12 h-12 object-contain shrink-0" />
+      <div className="bg-zinc-100 rounded-2xl px-4 py-3">
+        <span className="inline-flex items-center gap-[3px]">
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_infinite]" />
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.15s_infinite]" />
+          <span className="w-[6px] h-[6px] rounded-full bg-zinc-400 animate-[bounce_1.2s_ease-in-out_0.3s_infinite]" />
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -280,7 +286,6 @@ export default function ChatPanel({ videoId, videoTitle, isDone }: ChatPanelProp
               {msg.role === "assistant" ? (
                 <div className="prose prose-sm prose-zinc max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-pre:my-2 prose-code:text-xs prose-code:bg-zinc-200 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
                   <ReactMarkdown>{msg.content || ""}</ReactMarkdown>
-                  {msg.streaming && !msg.content && <TypingIndicator />}
                 </div>
               ) : (
                 <span>{msg.content}</span>
@@ -288,6 +293,11 @@ export default function ChatPanel({ videoId, videoTitle, isDone }: ChatPanelProp
             </div>
           </motion.div>
         ))}
+
+        {/* Typing indicator — outside message bubbles */}
+        {messages.some((m) => m.streaming && !m.content) && (
+          <TypingIndicator />
+        )}
 
         <div ref={messagesEndRef} />
       </div>

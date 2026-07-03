@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { CircleNotch, CheckCircle, XCircle, Queue, X } from "@phosphor-icons/react";
 import {
@@ -12,7 +12,8 @@ import {
   activeQueueCountAtom,
   type QueueItem,
 } from "@/atoms/queue";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeUserFacingError } from "@/lib/utils";
+import { UI_LABELS } from "@/lib/constants";
 
 /* --- Progress fetcher registry (removes hardcoded domain knowledge) --- */
 type ProgressFetcher = (id: string) => Promise<{ state: string; progress: number; message: string }>;
@@ -75,7 +76,7 @@ function QueueItemRow({ item, onRemove }: { item: QueueItem; onRemove: () => voi
         {item.state === "failed" && <XCircle size={14} weight="fill" className="text-red-400" />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[11px] font-medium text-zinc-700 truncate">{item.title || "整理中..."}</p>
+        <p className="text-[11px] font-medium text-zinc-700 truncate">{item.title || UI_LABELS.PROCESSING_DOTS}</p>
         <div className="flex items-center gap-1.5 mt-0.5">
           {item.state === "processing" && (
             <>
@@ -118,6 +119,7 @@ export function ProcessingQueue() {
   const unsubsRef = useRef<Map<string, () => void>>(new Map());
   const prevActiveRef = useRef(0);
   const router = useRouter();
+  const pathname = usePathname();
 
   // Auto-expand when an item finishes
   useEffect(() => {
@@ -136,9 +138,16 @@ export function ProcessingQueue() {
       const onProgress = (data: { state: string; progress: number; message: string }) => {
         if (data.state === "done") {
           updateItem({ id: item.id, type: item.type, state: "done", progress: 100, message: "" });
+          window.dispatchEvent(new CustomEvent("pingcha:queue-item-complete", {
+            detail: { id: item.id, type: item.type, state: "done", progress: 100, message: "" },
+          }));
           unsubsRef.current.delete(key);
         } else if (data.state === "failed") {
-          updateItem({ id: item.id, type: item.type, state: "failed", progress: 0, message: data.message || "整理失败" });
+          const message = sanitizeUserFacingError(data.message, "整理失败，请稍后重试");
+          updateItem({ id: item.id, type: item.type, state: "failed", progress: 0, message });
+          window.dispatchEvent(new CustomEvent("pingcha:queue-item-complete", {
+            detail: { id: item.id, type: item.type, state: "failed", progress: 0, message },
+          }));
           unsubsRef.current.delete(key);
         } else {
           updateItem({ id: item.id, type: item.type, progress: data.progress, message: data.message });
@@ -177,9 +186,10 @@ export function ProcessingQueue() {
   }, [queue, updateItem]);
 
   useEffect(() => {
+    const unsubs = unsubsRef.current;
     return () => {
-      unsubsRef.current.forEach((unsub) => unsub());
-      unsubsRef.current.clear();
+      unsubs.forEach((unsub) => unsub());
+      unsubs.clear();
     };
   }, []);
 
@@ -221,10 +231,11 @@ export function ProcessingQueue() {
   const failedCount = queue.filter((q) => q.state === "failed").length;
   const doneCount = queue.filter((q) => q.state === "done").length;
 
+  if (pathname === "/landing") return null;
   if (queue.length === 0) return null;
 
   const badgeLabel = activeCount > 0
-    ? `${activeCount} 条线索整理中`
+    ? UI_LABELS.QUEUE_PROCESSING(activeCount)
     : failedCount > 0 && doneCount === 0
       ? `${failedCount} 项失败`
       : failedCount > 0

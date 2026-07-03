@@ -74,9 +74,6 @@
   code, kbd, pre, samp {
     font-family: var(--font-geist-mono, "Geist Mono"), ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   }
-  img, video {
-    content-visibility: auto;
-  }
   .overflow-y-auto, .overflow-y-scroll {
     will-change: scroll-position;
     overscroll-behavior: contain;
@@ -148,6 +145,27 @@
   25% { transform: translateY(-12px) translateX(4px); }
   50% { transform: translateY(-6px) translateX(-6px); }
   75% { transform: translateY(-16px) translateX(2px); }
+}
+
+@keyframes landingHeroIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes landingHeroFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes landingScrollHint {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, 6px, 0); }
 }
 
 /* Landing heading — first-line color trick + weight boost */
@@ -305,4 +323,107 @@
   border-radius: 12px;
   border: 1px solid #e5e7eb;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+/* Shared article reading layout */
+.readable-article {
+  max-width: none;
+  font-size: 17px;
+  line-height: 2;
+  color: #3f3f46;
+  letter-spacing: 0;
+}
+.readable-article p {
+  margin: 0 0 1.1em;
+}
+.readable-article h1 {
+  font-size: 1.65em;
+  line-height: 1.35;
+  font-weight: 800;
+  color: #18181b;
+  margin: 1.4em 0 0.65em;
+}
+.readable-article h2 {
+  font-size: 1.35em;
+  line-height: 1.4;
+  font-weight: 750;
+  color: #18181b;
+  margin: 1.3em 0 0.55em;
+}
+.readable-article h3 {
+  font-size: 1.12em;
+  line-height: 1.45;
+  font-weight: 700;
+  color: #27272a;
+  margin: 1.15em 0 0.45em;
+}
+.readable-article strong {
+  font-weight: 700;
+  color: #18181b;
+}
+.readable-article em {
+  color: #52525b;
+}
+.readable-article a {
+  color: #059669;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  word-break: break-word;
+}
+.readable-article ul,
+.readable-article ol {
+  margin: 0 0 1.1em;
+  padding-left: 1.45em;
+}
+.readable-article ul {
+  list-style-type: disc;
+}
+.readable-article ol {
+  list-style-type: decimal;
+}
+.readable-article li {
+  margin: 0.35em 0;
+  padding-left: 0.15em;
+}
+.readable-article blockquote {
+  margin: 1.2em 0;
+  padding: 0.85em 1em;
+  border-left: 3px solid #10b981;
+  border-radius: 0 10px 10px 0;
+  background: #f0fdf4;
+  color: #3f3f46;
+}
+.readable-article code {
+  border-radius: 5px;
+  background: #f4f4f5;
+  color: #27272a;
+  padding: 0.15em 0.4em;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.readable-article pre {
+  margin: 1.2em 0;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #18181b;
+  padding: 1em 1.15em;
+}
+.readable-article pre code {
+  background: transparent;
+  color: #e4e4e7;
+  padding: 0;
+}
+.readable-article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1.25em auto;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+}
+.readable-article hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1.6em 0;
 }

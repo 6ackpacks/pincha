@@ -1,5 +1,4 @@
 import { request } from "./client";
-import { getQueryClient } from "@/lib/query-client";
 
 // Use relative path by default so requests go through nginx proxy in Docker.
 // Only use NEXT_PUBLIC_API_URL if explicitly set (e.g. local dev without nginx).
@@ -10,7 +9,16 @@ export interface CurrentUser {
   nickname: string | null;
   avatar_url: string | null;
   email: string | null;
+  phone: string | null;
   is_admin?: boolean;
+}
+
+export interface SessionInfo {
+  jti: string;
+  is_current: boolean;
+  created_at: number;
+  user_agent: string;
+  ip: string;
 }
 
 export function getMe() {
@@ -22,7 +30,16 @@ export async function logout() {
     method: "POST",
     credentials: "include",
   });
-  // Immediately clear the cached user so the sidebar re-renders with the
-  // logged-out state (default avatar) before the redirect.
-  getQueryClient().setQueryData(["me"], null);
+}
+
+export function refreshSession() {
+  return request<{ message: string }>("/api/v1/auth/refresh", { method: "POST" });
+}
+
+export function getSessions() {
+  return request<SessionInfo[]>("/api/v1/auth/sessions");
+}
+
+export function revokeSession(jti: string) {
+  return request<{ message: string }>(`/api/v1/auth/sessions/${jti}`, { method: "DELETE" });
 }

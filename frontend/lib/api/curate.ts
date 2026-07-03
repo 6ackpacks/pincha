@@ -1,4 +1,5 @@
 import { request } from "./client";
+import type { ArticleStatus } from "./articles";
 
 // ============================
 // Curate V2 Module
@@ -32,6 +33,9 @@ export interface CurateV2Pick {
   published_at: string | null;
   score: number | null;
   is_official: boolean;
+  article_id: string | null;
+  article_status?: ArticleStatus | null;
+  article_in_wiki?: boolean;
   created_at: string;
   // Enriched by frontend from channel context
   channel_slug?: string;
@@ -125,6 +129,8 @@ export interface PickDetail {
   is_official: boolean;
   raw_content: string | null;
   article_id: string | null;
+  article_status: ArticleStatus | null;
+  article_in_wiki: boolean;
   created_at: string | null;
 }
 
@@ -169,5 +175,4 @@ export function getProductReviews(productId: number, limit = 5) {
     `/api/v1/curate-v2/products/${productId}/reviews?limit=${limit}`
   );
 }
-
 

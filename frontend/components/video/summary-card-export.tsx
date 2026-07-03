@@ -3,7 +3,9 @@
 import React, { useRef } from "react";
 import { ImageSquare, CircleNotch } from "@phosphor-icons/react";
 import { useExportCard } from "@/lib/use-export-card";
+import { youtubeThumbnailFallback } from "@/lib/api/client";
 import { extractKeyPoints } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 
 interface SummaryCardExportProps {
   videoTitle: string;
@@ -79,6 +81,7 @@ export function SummaryCardExport({
                   opacity: 0.6,
                 }}
                 crossOrigin="anonymous"
+                onError={youtubeThumbnailFallback}
               />
               <div
                 style={{
@@ -189,7 +192,7 @@ export function SummaryCardExport({
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src="/logo-sm.png"
+                  src={cdnUrl("/logo-sm.png")}
                   alt="品猹"
                   style={{ width: 18, height: 18, borderRadius: 4 }}
                 />

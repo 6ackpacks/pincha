@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: [
       "lucide-react",
+      "@phosphor-icons/react",
       "framer-motion",
       "@radix-ui/react-dialog",
       "@radix-ui/react-tabs",
@@ -19,14 +20,11 @@ const nextConfig: NextConfig = {
     ],
   },
   images: {
-    // unoptimized: false (default) — next/image optimization enabled for future migration
     remotePatterns: [
       { protocol: "https", hostname: "i.ytimg.com" },
       { protocol: "https", hostname: "img.youtube.com" },
-      { protocol: "https", hostname: "i0.hdslb.com" },
-      { protocol: "https", hostname: "i1.hdslb.com" },
-      { protocol: "https", hostname: "i2.hdslb.com" },
       { protocol: "https", hostname: "**.hdslb.com" },
+      { protocol: "https", hostname: "pincha.tos-cn-beijing.volces.com" },
     ],
   },
   async rewrites() {

@@ -175,6 +175,10 @@ async def create_conversation(
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    kb = await db.get(KnowledgeBase, kb_id)
+    if not kb or kb.user_id != user.id:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+
     convo = KBConversation(kb_id=kb_id, user_id=user.id, title=body.title)
     db.add(convo)
     await db.commit()

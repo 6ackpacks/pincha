@@ -96,6 +96,7 @@ class Settings(BaseSettings):
 
     # Curate module
     RESEND_API_KEY: str = ""
+    DIGEST_EMAIL_FROM: str = "品猹每日精选 <digest@example.com>"
     PRODUCT_HUNT_API_KEY: str = ""
 
     class Config:

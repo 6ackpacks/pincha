@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.auth import get_current_kb_id, get_current_user
 from app.core.database import get_session
+from app.core.url_validator import SSRFError, validate_url_async
 from app.models.article import Article
 from app.models.user import User
 from app.models.wiki import WikiPage, WikiSource
@@ -73,6 +74,10 @@ async def create_article(
     if body.source_type == "url":
         if not body.source_url:
             raise HTTPException(status_code=422, detail="URL 类型需要提供 source_url")
+        try:
+            await validate_url_async(body.source_url)
+        except SSRFError as exc:
+            raise HTTPException(status_code=400, detail=f"URL 不合法：{exc}")
         article = Article(
             user_id=user_id,
             kb_id=kb_id,

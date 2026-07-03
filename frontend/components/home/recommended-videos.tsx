@@ -23,8 +23,8 @@ export function RecommendedVideos() {
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-2">
           <Fire size={20} weight="bold" className="text-orange-500" />
-          <h2 className="text-lg font-bold text-zinc-900">最近品读</h2>
-          <span className="text-sm text-zinc-400">最近汇入书房的内容线索</span>
+          <h2 className="text-lg font-bold text-zinc-900">热门品读</h2>
+          <span className="text-sm text-zinc-400">全站正在被反复阅读的内容线索</span>
         </div>
         <Link href="/trending" className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 font-medium transition-colors">
           查看全部 <ArrowRight size={14} weight="bold" />
@@ -50,7 +50,7 @@ export function RecommendedVideos() {
       ) : (
         <HScrollRow>
           {recentVideos.map((video, i) => (
-            <VideoCard key={video.id} video={video} index={i} />
+            <VideoCard key={video.id} video={video} index={i} href={`/videos/public/${video.id}`} />
           ))}
         </HScrollRow>
       )}

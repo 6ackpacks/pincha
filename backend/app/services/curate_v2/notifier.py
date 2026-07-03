@@ -7,8 +7,8 @@ Designed to run in sync Celery task context.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date, datetime, timezone
-from urllib.parse import urlparse
 
 import resend
 from sqlalchemy import select, text
@@ -117,7 +117,6 @@ def send_email_digests(pick_date: date, engine: Engine) -> int:
         return 0
 
     resend.api_key = settings.RESEND_API_KEY
-    sender_domain = urlparse(settings.FRONTEND_URL).hostname or "pingcha.app"
     sent = 0
 
     with engine.connect() as conn:
@@ -212,7 +211,7 @@ def send_email_digests(pick_date: date, engine: Engine) -> int:
 
             try:
                 resend.Emails.send({
-                    "from": f"品猹每日精选 <digest@{sender_domain}>",
+                    "from": settings.DIGEST_EMAIL_FROM,
                     "to": email,
                     "subject": f"品猹每日精选 · {date_str}",
                     "html": html_body,
@@ -223,3 +222,106 @@ def send_email_digests(pick_date: date, engine: Engine) -> int:
 
     logger.info("Sent %d email digests for %s", sent, pick_date)
     return sent
+
+
+def create_organize_done_notification(
+    user_id: uuid.UUID | str,
+    title: str,
+    action_url: str,
+    body: str | None = None,
+    engine: Engine | None = None,
+) -> None:
+    """Create a persistent 'organize_done' notification for a user.
+
+    Idempotent: re-inserts for the same user+action_url are skipped via the
+    partial unique index ``uq_curate_notif_organize_done``.
+
+    Designed to run in sync Celery task context — do NOT call from async code.
+    """
+    from app.models.curate_v2 import CurateNotification  # noqa: F401  (for clarity)
+
+    if engine is None:
+        from app.tasks.shared import get_sync_engine
+        _engine = get_sync_engine()
+    else:
+        _engine = engine
+    user_id_str = str(user_id)
+
+    with _engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO curate_notifications
+                    (user_id, pick_id, notif_type, title, body, action_url, is_read, created_at)
+                VALUES
+                    (:user_id, NULL, 'organize_done', :title, :body, :action_url, FALSE, NOW())
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "user_id": user_id_str,
+                "title": title,
+                "body": body,
+                "action_url": action_url,
+            },
+        )
+        conn.commit()
+
+
+def create_organize_done_notifications_for_video(
+    video_id: str,
+    title: str | None,
+    engine: Engine | None = None,
+) -> int:
+    """Create 'organize_done' notifications for every user who owns the video.
+
+    Queries ``user_videos`` for all owners and writes one notification each.
+    Returns the number of notifications actually created (duplicates skipped).
+    """
+    if engine is None:
+        from app.tasks.shared import get_sync_engine
+        _engine = get_sync_engine()
+    else:
+        _engine = engine
+    with _engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT user_id FROM user_videos WHERE video_id = :vid"),
+            {"vid": video_id},
+        ).fetchall()
+
+    if not rows:
+        return 0
+
+    video_title = title or "未命名视频"
+    action_url = f"/videos/{video_id}"
+    notif_title = f"解析完成：{video_title}"
+    for row in rows:
+        create_organize_done_notification(
+            user_id=row.user_id,
+            title=notif_title,
+            action_url=action_url,
+            body="字幕、摘要与思维导图已就绪，点击查看。",
+            engine=_engine,
+        )
+    logger.info(
+        "organize_done: queued %d notification(s) for video %s", len(rows), video_id
+    )
+    return len(rows)
+
+
+def create_organize_done_notification_for_article(
+    user_id: uuid.UUID | str,
+    article_id: str,
+    title: str | None,
+    engine: Engine | None = None,
+) -> None:
+    """Create a single 'organize_done' notification for an article's owner."""
+    article_title = title or "未命名文章"
+    action_url = f"/articles/{article_id}"
+    create_organize_done_notification(
+        user_id=user_id,
+        title=f"解析完成：{article_title}",
+        action_url=action_url,
+        body="文章摘要与思维导图已就绪，点击查看。",
+        engine=engine,
+    )

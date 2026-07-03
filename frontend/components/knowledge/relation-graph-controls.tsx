@@ -29,7 +29,7 @@ export function RelationGraphControls({
   onReset,
 }: RelationGraphControlsProps) {
   return (
-    <div className="flex flex-wrap items-center gap-4 px-4 py-2.5 bg-white border-t border-zinc-200">
+    <div className="flex flex-wrap items-center gap-3 px-3 py-2 bg-white/90 backdrop-blur-sm rounded-xl border border-zinc-200 shadow-sm">
       <div className="flex gap-1 mr-2">
         {(["type", "community"] as const).map((mode) => (
           <button

@@ -44,10 +44,13 @@ interface TabPanelProps {
   thumbnail?: string;
   segments: TranscriptSegment[];
   segmentsEn?: (TranscriptSegment | null)[] | null;
+  language?: string;
   isTranscriptLoading?: boolean;
   isDone?: boolean;
   currentState?: string;
   forcedTab?: TabKey;
+  streamingSummary?: string;
+  generationId?: string;
 }
 
 const TABS = [
@@ -59,7 +62,7 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
-export const TabPanel = React.memo(function TabPanel({ videoId, videoTitle, thumbnail, segments, segmentsEn, isTranscriptLoading, isDone, currentState, forcedTab }: TabPanelProps) {
+export const TabPanel = React.memo(function TabPanel({ videoId, videoTitle, thumbnail, segments, segmentsEn, language, isTranscriptLoading, isDone, currentState, forcedTab, streamingSummary, generationId }: TabPanelProps) {
   // Default to "translation" tab
   const [activeTab, setActiveTab] = useState<TabKey>("translation");
   // Track which tabs have been activated — activated tabs stay mounted to avoid re-fetching
@@ -113,20 +116,20 @@ export const TabPanel = React.memo(function TabPanel({ videoId, videoTitle, thum
 
       {/* Tab content — mindmap uses display:none instead of unmounting to preserve SVG state */}
       <div className="flex-1 overflow-hidden bg-white min-h-0">
-        <div className={cn("h-full", activeTab !== "translation" && "hidden")}>
+        <div className={cn("h-full min-h-0", activeTab !== "translation" && "hidden")}>
           <Suspense fallback={<PanelSkeleton />}>
-            <TranslationPanel segments={segments} videoId={videoId} segmentsEn={segmentsEn} isLoading={isTranscriptLoading} />
+            <TranslationPanel segments={segments} videoId={videoId} segmentsEn={segmentsEn} language={language} isLoading={isTranscriptLoading} />
           </Suspense>
         </div>
 
         <div className={cn("h-full overflow-y-auto", activeTab !== "summary" && "hidden")}>
           <Suspense fallback={<PanelSkeleton />}>
-            <SummaryPanel videoId={videoId} videoTitle={videoTitle} thumbnail={thumbnail} isDone={isDone} currentState={currentState} />
+            <SummaryPanel videoId={videoId} videoTitle={videoTitle} thumbnail={thumbnail} isDone={isDone} currentState={currentState} streamingSummary={streamingSummary} generationId={generationId} />
           </Suspense>
         </div>
 
         {/* Mindmap: only mount after first activation, then keep alive via hidden to preserve SVG */}
-        <div className={cn("h-full flex flex-col", activeTab !== "mindmap" && "hidden")}>
+        <div className={cn("h-full flex flex-col min-h-0", activeTab !== "mindmap" && "hidden")}>
           {activatedTabs.has("mindmap") && (
             <Suspense fallback={<PanelSkeleton />}>
               <MindmapPanel videoId={videoId} isDone={isDone} segments={segments} />
@@ -135,7 +138,7 @@ export const TabPanel = React.memo(function TabPanel({ videoId, videoTitle, thum
         </div>
 
         {/* Chat: only mount after first activation, then keep alive to preserve conversation */}
-        <div className={cn("h-full flex flex-col", activeTab !== "chat" && "hidden")}>
+        <div className={cn("h-full flex flex-col min-h-0", activeTab !== "chat" && "hidden")}>
           {activatedTabs.has("chat") && (
             <Suspense fallback={<PanelSkeleton />}>
               <ChatPanel videoId={videoId} videoTitle={videoTitle} isDone={isDone ?? false} />

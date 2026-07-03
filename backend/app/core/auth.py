@@ -215,6 +215,23 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    session: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_session),
+) -> User | None:
+    """Like get_current_user but returns None for unauthenticated/invalid sessions.
+
+    用于公开端点在不要求登录的前提下为已登录用户做个性化（如在公开视频详情上
+    标记 in_library）。任何认证异常（401/503）都降级为 None，保证公开页面可访问。
+    """
+    if not session:
+        return None
+    try:
+        return await get_current_user(session=session, db=db)
+    except HTTPException:
+        return None
+
+
 async def require_admin_user(
     user: User = Depends(get_current_user),
 ) -> User:

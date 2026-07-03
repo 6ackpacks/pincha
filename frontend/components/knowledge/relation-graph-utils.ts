@@ -4,8 +4,8 @@ import {
   getNodeTypeColor,
 } from "@/lib/constants/community-colors";
 
-export const BASE_NODE_SIZE = 8;
-export const MAX_NODE_SIZE = 28;
+export const BASE_NODE_SIZE = 4;
+export const MAX_NODE_SIZE = 14;
 export const LABEL_SIZE = 13;
 
 export function mixColor(a: string, b: string, ratio: number): string {
@@ -25,15 +25,8 @@ export function mixColor(a: string, b: string, ratio: number): string {
   return `#${toHex(mix(r1, r2))}${toHex(mix(g1, g2))}${toHex(mix(b1, b2))}`;
 }
 
-export const positionCache = new Map<string, { x: number; y: number }>();
-export const POSITION_CACHE_LIMIT = 500;
-export let lastLayoutDataKey = "";
-
-export function setLastLayoutDataKey(key: string) {
-  lastLayoutDataKey = key;
-}
-
 const STORAGE_KEY = "pingcha_graph_positions";
+const POSITION_CACHE_LIMIT = 500;
 
 export function savePositionsToStorage(positions: Map<string, { x: number; y: number }>) {
   try {
@@ -54,10 +47,18 @@ export function loadPositionsFromStorage(): Map<string, { x: number; y: number }
   } catch { return new Map(); }
 }
 
-export function clearPositionCache() {
-  positionCache.clear();
-  setLastLayoutDataKey("");
+export function clearPositionStorage() {
   try { localStorage.removeItem(STORAGE_KEY); } catch {}
+}
+
+export function applyColors(graph: any, colorMode: "type" | "community"): void {
+  graph.forEachNode((nodeId: string) => {
+    const color = colorMode === "community"
+      ? getCommunityColor(graph.getNodeAttribute(nodeId, "communityId"))
+      : getNodeTypeColor(graph.getNodeAttribute(nodeId, "nodeType"));
+    graph.setNodeAttribute(nodeId, "color", color);
+    graph.setNodeAttribute(nodeId, "originalColor", color);
+  });
 }
 
 function hashString(str: string): number {
@@ -68,21 +69,18 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-/**
- * Build a graphology graph from GraphData, apply edge pruning, node sizing,
- * coloring, and ForceAtlas2 layout. Returns the constructed graph instance.
- */
 export function buildGraph(
   Graph: any,
   forceAtlas2: any,
   graphData: GraphData,
-  colorMode: "type" | "community",
-) {
+  positionCache: Map<string, { x: number; y: number }>,
+  lastLayoutDataKey: string,
+): { graph: any; allCached: boolean; isNewLayout: boolean; newLayoutDataKey: string; graphExtent: { minX: number; maxX: number; minY: number; maxY: number; centerX: number; centerY: number } } {
   const graph = new Graph();
 
-  // Load persisted positions from localStorage
+  // Merge persisted positions into the provided instance-level cache
   const storedPositions = loadPositionsFromStorage();
-  storedPositions.forEach((v, k) => positionCache.set(k, v));
+  storedPositions.forEach((v, k) => { if (!positionCache.has(k)) positionCache.set(k, v); });
 
   // Pre-compute degree for deterministic initial layout
   const degreeMap = new Map<string, number>();
@@ -192,38 +190,35 @@ export function buildGraph(
   });
 
   // ── Node size: sqrt(linkCount) ─────────────────────────────────────
-  const maxDegree = Math.max(...Array.from({ length: graph.order }, (_, i) => graph.degree(graph.nodes()[i])), 1);
+  let maxDegree = 1;
+  graph.forEachNode((nodeId: string) => {
+    const d = graph.degree(nodeId);
+    if (d > maxDegree) maxDegree = d;
+  });
 
   graph.forEachNode((nodeId: string) => {
     const linkCount = graph.degree(nodeId);
     const ratio = linkCount / maxDegree;
     const size = BASE_NODE_SIZE + Math.sqrt(ratio) * (MAX_NODE_SIZE - BASE_NODE_SIZE);
-
-    const color = colorMode === "community"
-      ? getCommunityColor(graph.getNodeAttribute(nodeId, "communityId"))
-      : getNodeTypeColor(graph.getNodeAttribute(nodeId, "nodeType"));
-
     graph.setNodeAttribute(nodeId, "size", size);
-    graph.setNodeAttribute(nodeId, "color", color);
-    graph.setNodeAttribute(nodeId, "originalColor", color);
     graph.setNodeAttribute(nodeId, "originalSize", size);
   });
 
-  // ── Edge visual: slate-500 with weight-based opacity ───────────────
+  // ── Edge visual: subtle by default, stronger edges slightly more visible ──
   graph.forEachEdge((edge: string, attrs: any) => {
     const w = attrs.weight || 0.5;
-    const edgeSize = 0.5 + w * 3.5;
-    const alpha = (40 + w * 180) / 255;
+    const edgeSize = w > 0.7 ? 0.6 : 0.4;
+    const alpha = w > 0.7 ? 0.25 : 0.12;
+    const color = `rgba(180,190,200,${alpha.toFixed(2)})`;
     graph.setEdgeAttribute(edge, "size", edgeSize);
-    graph.setEdgeAttribute(edge, "color", `rgba(100,116,139,${alpha.toFixed(2)})`);
+    graph.setEdgeAttribute(edge, "color", color);
     graph.setEdgeAttribute(edge, "originalSize", edgeSize);
-    graph.setEdgeAttribute(edge, "originalColor", `rgba(100,116,139,${alpha.toFixed(2)})`);
+    graph.setEdgeAttribute(edge, "originalColor", color);
   });
 
   // ── ForceAtlas2 layout ─────────────────────────────────────────────
   const dataKey = graphData.nodes.map((n) => n.id).sort().join(",") + "|" + graphData.edges.length;
   const isNewLayout = dataKey !== lastLayoutDataKey;
-  setLastLayoutDataKey(dataKey);
 
   const allCached = graphData.nodes.every((n) => positionCache.has(n.id));
 
@@ -271,7 +266,6 @@ export function buildGraph(
         const normalizedDegree = d / maxDeg;
         const dx = attrs.x - cx;
         const dy = attrs.y - cy;
-
         const factor = 1 - (normalizedDegree * 0.15) + ((1 - normalizedDegree) * 0.08);
         graph.setNodeAttribute(nodeId, "x", cx + dx * factor);
         graph.setNodeAttribute(nodeId, "y", cy + dy * factor);
@@ -281,16 +275,225 @@ export function buildGraph(
     }
   }
 
-  // Cache positions and persist to localStorage
+  // Compute graph extent for d3-force adaptive parameters
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, cx = 0, cy = 0, count = 0;
+  graph.forEachNode((nodeId: string, attrs: any) => {
+    if (attrs.x < minX) minX = attrs.x;
+    if (attrs.x > maxX) maxX = attrs.x;
+    if (attrs.y < minY) minY = attrs.y;
+    if (attrs.y > maxY) maxY = attrs.y;
+    cx += attrs.x; cy += attrs.y; count++;
+  });
+  cx /= count || 1; cy /= count || 1;
+  const graphExtent = { minX, maxX, minY, maxY, centerX: cx, centerY: cy };
+
+  // Cache final positions back into the instance-level positionCache
   graph.forEachNode((nodeId: string, attrs: any) => {
     positionCache.set(nodeId, { x: attrs.x, y: attrs.y });
   });
   if (positionCache.size > POSITION_CACHE_LIMIT) {
-    const entries = [...positionCache.entries()];
-    const toRemove = entries.slice(0, entries.length - POSITION_CACHE_LIMIT);
-    for (const [key] of toRemove) positionCache.delete(key);
+    const toRemove = [...positionCache.keys()].slice(0, positionCache.size - POSITION_CACHE_LIMIT);
+    for (const k of toRemove) positionCache.delete(k);
   }
   savePositionsToStorage(positionCache);
 
-  return { graph, allCached, isNewLayout };
+  return { graph, allCached, isNewLayout, newLayoutDataKey: dataKey, graphExtent };
+}
+
+// ── Physics parameter mapping (Phase 2C) ────────────────────────────────
+
+export interface PhysicsPreferences {
+  density: number;   // 0–100
+  repulsion: number; // 0–100
+  tension: number;   // 0–100
+}
+
+export interface ResolvedPhysicsConfig {
+  linkDistance: number;
+  linkStrength: number;
+  chargeStrength: number;
+  collisionRadius: number;
+}
+
+export const PHYSICS_STORAGE_KEY = "pingcha_graph_physics_preferences_v1";
+
+export const DEFAULT_PHYSICS_PREFERENCES: PhysicsPreferences = {
+  density: 50,
+  repulsion: 50,
+  tension: 50,
+};
+
+/**
+ * Convert user 0–100 preference to D3 force linkDistance.
+ * density 50 → baseLinkDist (from buildGraph adaptive calculation)
+ * density 0  → baseLinkDist × 0.70 (compact)
+ * density 100 → baseLinkDist × 1.55 (spread)
+ */
+export function resolveLinkDistance(density: number, baseLinkDist: number): number {
+  const clamped = Math.max(0, Math.min(100, density));
+  const ratio = 0.70 + (clamped / 100) * (1.55 - 0.70);
+  return Math.max(10, baseLinkDist * ratio);
+}
+
+/**
+ * Convert user 0–100 preference to D3 forceManyBody strength.
+ * repulsion 50 → baseRepulsion (from buildGraph adaptive calculation: -sqrt(N)*8)
+ * repulsion 0  → baseRepulsion × 0.55 (weaker)
+ * repulsion 100 → baseRepulsion × 1.80 (stronger)
+ */
+export function resolveChargeStrength(repulsion: number, baseRepulsion: number): number {
+  const clamped = Math.max(0, Math.min(100, repulsion));
+  const ratio = 0.55 + (clamped / 100) * (1.80 - 0.55);
+  return baseRepulsion * ratio;
+}
+
+/**
+ * Convert user 0–100 preference to D3 forceLink strength.
+ * tension 50 → 0.35 (Phase 2B default)
+ * tension 0  → 0.35 × 0.55 (loose)
+ * tension 100 → 0.35 × 1.50 (tight)
+ */
+export function resolveLinkStrength(tension: number): number {
+  const clamped = Math.max(0, Math.min(100, tension));
+  const ratio = 0.55 + (clamped / 100) * (1.50 - 0.55);
+  return Math.max(0.01, 0.35 * ratio);
+}
+
+/**
+ * Compute all resolved physics config from user preferences and graph metrics.
+ */
+export function computePhysicsConfig(
+  prefs: PhysicsPreferences,
+  baseLinkDist: number,
+  baseRepulsion: number,
+  collisionRadius: number,
+): ResolvedPhysicsConfig {
+  return {
+    linkDistance: resolveLinkDistance(prefs.density, baseLinkDist),
+    chargeStrength: resolveChargeStrength(prefs.repulsion, baseRepulsion),
+    linkStrength: resolveLinkStrength(prefs.tension),
+    collisionRadius,
+  };
+}
+
+/**
+ * Load physics preferences from localStorage. SSR-safe.
+ */
+export function loadPhysicsPreferences(): PhysicsPreferences {
+  try {
+    const raw = localStorage.getItem(PHYSICS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PHYSICS_PREFERENCES };
+    const obj = JSON.parse(raw) as Partial<PhysicsPreferences>;
+    return {
+      density: typeof obj.density === "number" ? Math.max(0, Math.min(100, obj.density)) : DEFAULT_PHYSICS_PREFERENCES.density,
+      repulsion: typeof obj.repulsion === "number" ? Math.max(0, Math.min(100, obj.repulsion)) : DEFAULT_PHYSICS_PREFERENCES.repulsion,
+      tension: typeof obj.tension === "number" ? Math.max(0, Math.min(100, obj.tension)) : DEFAULT_PHYSICS_PREFERENCES.tension,
+    };
+  } catch {
+    return { ...DEFAULT_PHYSICS_PREFERENCES };
+  }
+}
+
+/**
+ * Save physics preferences to localStorage. Debounced by caller.
+ */
+export function savePhysicsPreferences(prefs: PhysicsPreferences): void {
+  try {
+    localStorage.setItem(PHYSICS_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {}
+}
+
+/**
+ * Human-readable label for density value.
+ */
+export function densityLabel(value: number): string {
+  if (value < 30) return "紧凑";
+  if (value < 70) return "标准";
+  return "舒展";
+}
+
+/**
+ * Human-readable label for repulsion value.
+ */
+export function repulsionLabel(value: number): string {
+  if (value < 30) return "弱";
+  if (value < 70) return "标准";
+  return "强";
+}
+
+/**
+ * Human-readable label for tension value.
+ */
+export function tensionLabel(value: number): string {
+  if (value < 30) return "松";
+  if (value < 70) return "标准";
+  return "紧";
+}
+
+// ── Layout calibration helpers (Phase 2D: unit mismatch fix) ───────────────
+
+/**
+ * Compute D3-compatible collision radius in graph coordinate space.
+ * Sigma renders node size in pixels, but D3 operates in graph coordinate space.
+ * We derive the collision radius by:
+ *   1. Computing avg node size in pixels
+ *   2. Computing pixel-to-graph ratio from graphExtent and a reference viewport (800px wide)
+ *   3. Adding padding proportional to the graph scale
+ */
+export function computeCollisionRadius(
+  graphExtent: { minX: number; maxX: number; minY: number; maxY: number; centerX: number; centerY: number },
+  nodeSizes: number[],
+  avgPixelNodeSize: number,
+): number {
+  const graphWidth = graphExtent.maxX - graphExtent.minX || 1;
+  const graphHeight = graphExtent.maxY - graphExtent.minY || 1;
+  const extentSpan = Math.sqrt(graphWidth * graphHeight);
+
+  // Reference viewport: assume ~800px wide graph area
+  const REF_VIEWPORT = 800;
+  const pixelPerGraphUnit = REF_VIEWPORT / extentSpan;
+
+  // Collision radius in graph units: avg pixel size → graph units + padding
+  const pixelPadding = 8; // breathing room in pixels
+  const totalPixelRadius = avgPixelNodeSize / 2 + pixelPadding;
+  const graphCollisionRadius = totalPixelRadius / pixelPerGraphUnit;
+
+  // Also scale with avg node size variation
+  const avgSize = nodeSizes.reduce((a, b) => a + b, 0) / (nodeSizes.length || 1);
+  const sizeRatio = avgSize / BASE_NODE_SIZE;
+  const finalRadius = graphCollisionRadius * Math.sqrt(sizeRatio);
+
+  // Clamp: minimum meaningful separation, maximum to avoid pushing everything outward
+  return Math.max(extentSpan * 0.005, Math.min(finalRadius, extentSpan * 0.05));
+}
+
+/**
+ * Compute a more aggressive default link distance for D3 forceLink.
+ * Returns distance in graph coordinate units.
+ */
+export function computeDefaultLinkDistance(
+  graphExtent: { minX: number; maxX: number; minY: number; maxY: number; centerX: number; centerY: number },
+  N: number,
+): number {
+  const graphWidth = graphExtent.maxX - graphExtent.minX || 1;
+  const graphHeight = graphExtent.maxY - graphExtent.minY || 1;
+  const extentSpan = Math.sqrt(graphWidth * graphHeight);
+  // Phase 2B default was: max(30, min((extentSpan/√N)*1.2, 120))
+  // This returns a graph-coordinate distance — for N~67, extentSpan~500: ~73
+  return Math.max(extentSpan * 0.08, Math.min(extentSpan * 0.18, extentSpan * 0.25));
+}
+
+/**
+ * Compute stronger default charge strength for D3 forceManyBody.
+ */
+export function computeDefaultChargeStrength(
+  N: number,
+  graphExtent: { minX: number; maxX: number; minY: number; maxY: number; centerX: number; centerY: number },
+): number {
+  const graphWidth = graphExtent.maxX - graphExtent.minX || 1;
+  const graphHeight = graphExtent.maxY - graphExtent.minY || 1;
+  const extentSpan = Math.sqrt(graphWidth * graphHeight);
+  // Much stronger than Phase 2B's -sqrt(N)*8
+  // Use extentSpan-normalized strength so it works across different graph scales
+  return -extentSpan * 0.15; // ~-75 for extentSpan=500
 }

@@ -1,23 +1,29 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import { DownloadSimple, FileText, CircleNotch, ListBullets, Cursor } from "@phosphor-icons/react";
 import {
   getSummary,
   regenerateSummaryStream,
   getAvailableSummaryLevels,
   triggerFullSummary,
-  subscribeSummaryStream,
   type SummaryLevel,
   type SummaryResponse,
 } from "@/lib/api/videos";
 import { SummaryCardExport } from "./summary-card-export";
 import { SUMMARY_LEVELS } from "@/lib/constants";
-import { LoadingPlaceholder, StreamingIndicator } from "@/components/ui/loading-placeholder";
+import { LoadingPlaceholder, MascotLoading, StreamingIndicator } from "@/components/ui/loading-placeholder";
+import {
+  trackStreamingUIEvent,
+  recordStreamingMetric,
+  nowMs,
+  STREAMING_THRESHOLDS,
+} from "@/lib/streaming-telemetry";
 
 interface SummaryPanelProps {
   videoId: string;
@@ -25,30 +31,92 @@ interface SummaryPanelProps {
   thumbnail?: string;
   isDone?: boolean;
   currentState?: string;
+  streamingSummary?: string;
+  /** Front-end-only generation trace id (one per generation run). */
+  generationId?: string;
 }
 
-export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, currentState }: SummaryPanelProps) {
+// Block-level memoization to avoid re-rendering completed paragraphs during streaming
+const MemoizedMarkdownBlock = memo(({ content }: { content: string }) => (
+  <ReactMarkdown>{content}</ReactMarkdown>
+));
+MemoizedMarkdownBlock.displayName = "MemoizedMarkdownBlock";
+
+function StreamingMarkdown({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+  const blocks = useMemo(() => {
+    const parts = content.split(/\n\n+/);
+    return parts.filter(p => p.trim());
+  }, [content]);
+
+  if (!content) return null;
+
+  return (
+    <>
+      {blocks.map((block, i) => {
+        const isLast = i === blocks.length - 1;
+        if (isLast && isStreaming) {
+          // Last block (still being written) — don't memo
+          return <ReactMarkdown key={`live-${i}`}>{block}</ReactMarkdown>;
+        }
+        return <MemoizedMarkdownBlock key={`block-${i}`} content={block} />;
+      })}
+    </>
+  );
+}
+
+export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, currentState, streamingSummary, generationId }: SummaryPanelProps) {
   const [activeLevel, setActiveLevel] = useState<SummaryLevel | null>(null);
   const [fullGenerating, setFullGenerating] = useState(false);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [isInitialStreaming, setIsInitialStreaming] = useState(false);
-  const [initialStreamContent, setInitialStreamContent] = useState("");
   const [streamError, setStreamError] = useState<string | null>(null);
   const [streamTimeout, setStreamTimeout] = useState(false);
+  const [forceLoadedLevels, setForceLoadedLevels] = useState<string[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const cleanupStreamRef = useRef<(() => void) | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userSelectedRef = useRef(false);
   const queryClient = useQueryClient();
+
+  // --- Streaming UI telemetry ---------------------------------------------
+  // Stable generation id for trace tagging (defaults when parent omits it).
+  const gid = generationId ?? "no-generation";
+  // render counter: bumped every render; bumps during streaming feed the
+  // render_count_during_stream metric.
+  const renderCountRef = useRef(0);
+  renderCountRef.current += 1;
+  // Previous AnimatePresence key, to detect remount-triggering key changes.
+  const prevKeyRef = useRef<string | null>(null);
+  // Timestamp (monotonic) of the latest streamingSummary change, for delta→paint.
+  const lastStreamChangeAtRef = useRef<number | null>(null);
+  // Timestamp (monotonic) when isDone first became true, for finalize→stable.
+  const finalizeStartedAtRef = useRef<number | null>(null);
+  const finalizeStableRecordedRef = useRef(false);
+  // Whether the displayed summary content was non-empty last render (empty/restore).
+  const wasContentNonEmptyRef = useRef(false);
 
   const isSummarizing =
     currentState === "summarizing" || currentState === "generating_mindmap";
+
+  // Track when isDone first becomes true to implement a grace period for cache propagation
+  const [doneTimestamp, setDoneTimestamp] = useState<number | null>(null);
+  const [pastGracePeriod, setPastGracePeriod] = useState(false);
+  useEffect(() => {
+    if (isDone && !doneTimestamp) {
+      setDoneTimestamp(Date.now());
+      setPastGracePeriod(false);
+      const timer = setTimeout(() => setPastGracePeriod(true), 3000);
+      return () => clearTimeout(timer);
+    } else if (!isDone) {
+      setDoneTimestamp(null);
+      setPastGracePeriod(false);
+    }
+  }, [isDone, doneTimestamp]);
 
   const { data: availableLevels } = useQuery<string[]>({
     queryKey: ["summaryAvailable", videoId],
     queryFn: () => getAvailableSummaryLevels(videoId),
     enabled: !!videoId && (isSummarizing || !!isDone),
-    staleTime: 60 * 1000,
+    staleTime: 0,
     refetchInterval: (query) => {
       const count = (query.state.data ?? []).length;
       const allReady = count >= 3 && (!fullGenerating || count >= 4);
@@ -56,65 +124,71 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
     },
   });
 
-  const availableSet = new Set(availableLevels ?? []);
+  const availableSet = new Set([
+    ...(availableLevels ?? []),
+    ...(forceLoadedLevels ?? []),
+  ]);
 
-  // Default to "detailed" when it becomes available (or during streaming)
+  // Force-load available levels when isDone becomes true (fallback mechanism)
+  // No delay — fetch immediately so detailed summary displays as soon as possible.
   useEffect(() => {
-    if (activeLevel === null) {
-      if (availableSet.has("detailed") || isInitialStreaming) {
-        setActiveLevel("detailed");
-      } else if (availableSet.has("express")) {
-        setActiveLevel("express");
+    if (!isDone || !videoId) return;
+    let cancelled = false;
+
+    const applyLevels = (levels: string[]) => {
+      if (cancelled) return;
+      setForceLoadedLevels(levels);
+      queryClient.refetchQueries({ queryKey: ["summaryAvailable", videoId] });
+      for (const level of levels) {
+        queryClient.invalidateQueries({ queryKey: ["summary", videoId, level] });
+      }
+      if (!activeLevel && !userSelectedRef.current) {
+        setActiveLevel(levels.includes("detailed") ? "detailed" : levels[0] as SummaryLevel);
+      }
+    };
+
+    (async () => {
+      try {
+        const levels = await getAvailableSummaryLevels(videoId);
+        if (levels && levels.length > 0) {
+          applyLevels(levels);
+        }
+      } catch {
+        // First attempt failed — retry once after 500ms
+        if (cancelled) return;
+        setTimeout(async () => {
+          try {
+            const levels = await getAvailableSummaryLevels(videoId);
+            if (levels && levels.length > 0) {
+              applyLevels(levels);
+            }
+          } catch {
+            console.warn("[SummaryPanel] Force load levels failed after retry");
+          }
+        }, 500);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [isDone, videoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Progressive auto-upgrade: show the best available level immediately.
+  // If user manually selects a tab, stop auto-upgrading.
+  const LEVEL_PRIORITY: SummaryLevel[] = ["detailed", "highlight", "express"];
+  useEffect(() => {
+    if (userSelectedRef.current) return;
+    if (streamingSummary && !availableSet.has("detailed")) {
+      setActiveLevel("detailed");
+      return;
+    }
+    for (const level of LEVEL_PRIORITY) {
+      if (availableSet.has(level)) {
+        setActiveLevel(level);
+        return;
       }
     }
-  }, [availableLevels, isDone, isInitialStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [availableLevels, isDone, streamingSummary, forceLoadedLevels]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Subscribe to summary stream when summarizing starts
-  useEffect(() => {
-    if (!isSummarizing || availableSet.has("detailed")) return;
-
-    setIsInitialStreaming(true);
-    setInitialStreamContent("");
-    setActiveLevel("detailed");
-    setStreamError(null);
-    setStreamTimeout(false);
-
-    // Set timeout warning after 60 seconds
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      if (isInitialStreaming) {
-        setStreamTimeout(true);
-      }
-    }, 60000);
-
-    const cleanup = subscribeSummaryStream(
-      videoId,
-      (_level, delta) => {
-        setInitialStreamContent((prev) => prev + delta);
-        setStreamTimeout(false); // Reset timeout if we're receiving data
-      },
-      (level) => {
-        queryClient.invalidateQueries({ queryKey: ["summaryAvailable", videoId] });
-        queryClient.invalidateQueries({ queryKey: ["summary", videoId, level] });
-      },
-      (error) => {
-        setIsInitialStreaming(false);
-        if (error) {
-          setStreamError(error.message || "连接中断，请刷新重试");
-        }
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        queryClient.invalidateQueries({ queryKey: ["summaryAvailable", videoId] });
-        queryClient.invalidateQueries({ queryKey: ["summary", videoId, "detailed"] });
-      },
-    );
-    cleanupStreamRef.current = cleanup;
-
-    return () => {
-      cleanup();
-      cleanupStreamRef.current = null;
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [isSummarizing, videoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-switch to full when it becomes available after on-demand generation
   useEffect(() => {
@@ -126,8 +200,10 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
 
   // Abort streaming on unmount or videoId change
   useEffect(() => {
+    const timeout = timeoutRef.current;
     return () => {
       abortRef.current?.abort();
+      if (timeout) clearTimeout(timeout);
     };
   }, [videoId]);
 
@@ -135,13 +211,38 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
     data: summary,
     isLoading,
     isError,
-    error,
   } = useQuery<SummaryResponse>({
     queryKey: ["summary", videoId, activeLevel],
     queryFn: () => getSummary(videoId, activeLevel!),
-    enabled: !!activeLevel && availableSet.has(activeLevel),
+    // Enable when level is in availableSet OR when isDone (optimistic: detailed may
+    // already exist in DB even if availableLevels hasn't propagated yet)
+    enabled: !!activeLevel && (availableSet.has(activeLevel) || !!isDone),
     staleTime: Infinity,
+    retry: isDone ? 3 : 1,
+    retryDelay: 1000,
   });
+
+  // Determine whether we should actually show an error to the user
+  const shouldShowError = useMemo(() => {
+    // Still processing → never show error (backend hasn't finished)
+    if (isSummarizing) return false;
+    // Streaming from parent → don't show error
+    if (streamingSummary && !summary?.content) return false;
+    // Query didn't error → nothing to show
+    if (!isError) return false;
+    // isDone is not true → still in some intermediate state, don't alarm user
+    if (!isDone) return false;
+    // Give 3 seconds after isDone for cache invalidation to propagate
+    if (!pastGracePeriod) return false;
+    return true;
+  }, [isSummarizing, streamingSummary, summary?.content, isError, isDone, pastGracePeriod]);
+
+  // Whether the active tab's level is still being generated (not yet in availableSet)
+  const isActiveLevelGenerating = useMemo(() => {
+    if (!activeLevel) return false;
+    if (activeLevel === "full") return false; // full has its own on-demand flow
+    return isSummarizing && !availableSet.has(activeLevel);
+  }, [activeLevel, isSummarizing, availableSet.size]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const regenerate = useMutation({
     mutationFn: async () => {
@@ -216,22 +317,160 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
 
   const isFullOnDemand = activeLevel === "full" && !availableSet.has("full");
 
+  // --- Telemetry: derived display content + AnimatePresence key -----------
+  // Mirror exactly the content fed to <StreamingMarkdown> below, so empty/
+  // restore detection and delta→paint reflect what the user actually sees.
+  const displayedContent =
+    (streamingSummary && !summary?.content) ? streamingSummary
+    : isStreaming ? (streamingContent || "")
+    : (summary?.content ?? "");
+  // Stable across the streaming→final transition of one level: keyed by
+  // activeLevel only, NOT summary.id. When the final summary arrives (gaining
+  // an id), the key must NOT change — otherwise AnimatePresence unmounts the
+  // streamed node and remounts a fresh one, replaying the enter animation and
+  // flashing the panel. Switching levels still changes the key (intended).
+  const currentKey = activeLevel ?? "streaming";
+  const isStreamingNow = isStreaming || (!!streamingSummary && !summary?.content);
+
+  const traceBase = useMemo(
+    () => ({ video_id: videoId, generation_id: gid, ui_session_id: undefined, active_level: activeLevel }),
+    [videoId, gid, activeLevel],
+  );
+
+  // Mount / unmount. unmount within a live generation is a flicker signal →
+  // recorded as warning by the telemetry module's ALWAYS_WARNING set is not
+  // applied to mount/unmount, so flag the reason explicitly for querying.
+  useEffect(() => {
+    trackStreamingUIEvent({
+      video_id: videoId,
+      generation_id: gid,
+      active_level: null,
+      event_type: "summary_panel_mount",
+      source: "snapshot",
+      component_key: "SummaryPanel",
+    });
+    return () => {
+      trackStreamingUIEvent({
+        video_id: videoId,
+        generation_id: gid,
+        active_level: null,
+        event_type: "summary_panel_unmount",
+        source: "snapshot",
+        component_key: "SummaryPanel",
+        severity: "warning",
+      });
+    };
+    // Mount/unmount once per panel instance — gid captured at mount is fine.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // AnimatePresence key change → potential remount of the content block.
+  useEffect(() => {
+    const prev = prevKeyRef.current;
+    if (prev !== null && prev !== currentKey) {
+      trackStreamingUIEvent({
+        ...traceBase,
+        event_type: "summary_panel_key_changed",
+        source: "snapshot",
+        component_key: currentKey,
+        reason: `${prev} → ${currentKey}`,
+      });
+    }
+    prevKeyRef.current = currentKey;
+  }, [currentKey, traceBase]);
+
+  // Render count during streaming → metric (one increment per render while streaming).
+  useEffect(() => {
+    if (isStreamingNow) {
+      recordStreamingMetric(gid, "render_count_during_stream", 1);
+    }
+  });
+
+  // delta→paint: when streamingSummary changes, measure time to the next frame.
+  useEffect(() => {
+    if (!streamingSummary) return;
+    if (typeof window === "undefined" || typeof requestAnimationFrame === "undefined") return;
+    const startedAt = nowMs();
+    lastStreamChangeAtRef.current = startedAt;
+    const raf = requestAnimationFrame(() => {
+      const elapsed = nowMs() - startedAt;
+      recordStreamingMetric(gid, "delta_to_paint_ms", elapsed);
+      if (elapsed > STREAMING_THRESHOLDS.DELTA_TO_PAINT_MS) {
+        trackStreamingUIEvent({
+          ...traceBase,
+          event_type: "delta_to_paint_slow",
+          source: "delta",
+          reason: `delta→paint ${Math.round(elapsed)}ms`,
+        });
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [streamingSummary, gid, traceBase]);
+
+  // summary content became empty / restored (flicker / content-disappear signal).
+  useEffect(() => {
+    const nonEmpty = displayedContent.trim().length > 0;
+    const wasNonEmpty = wasContentNonEmptyRef.current;
+    if (wasNonEmpty && !nonEmpty) {
+      trackStreamingUIEvent({
+        ...traceBase,
+        event_type: "summary_content_became_empty",
+        source: "snapshot",
+        reason: "displayed summary went non-empty → empty",
+      });
+    } else if (!wasNonEmpty && nonEmpty) {
+      trackStreamingUIEvent({
+        ...traceBase,
+        event_type: "summary_content_restored",
+        source: "snapshot",
+        content_length: displayedContent.length,
+      });
+    }
+    wasContentNonEmptyRef.current = nonEmpty;
+  }, [displayedContent, traceBase]);
+
+  // finalize→stable: time from isDone to first stable non-empty render.
+  useEffect(() => {
+    if (isDone && finalizeStartedAtRef.current === null) {
+      finalizeStartedAtRef.current = nowMs();
+      finalizeStableRecordedRef.current = false;
+    } else if (!isDone) {
+      finalizeStartedAtRef.current = null;
+      finalizeStableRecordedRef.current = false;
+    }
+  }, [isDone]);
+
+  useEffect(() => {
+    if (
+      isDone &&
+      !finalizeStableRecordedRef.current &&
+      finalizeStartedAtRef.current !== null &&
+      !isStreamingNow &&
+      displayedContent.trim().length > 0
+    ) {
+      finalizeStableRecordedRef.current = true;
+      recordStreamingMetric(gid, "finalize_to_stable_ms", nowMs() - finalizeStartedAtRef.current);
+    }
+  }, [isDone, isStreamingNow, displayedContent, gid]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Level selector */}
+      {/* Level selector — each tab independently clickable once its level is available */}
       <div className="shrink-0 px-4 pt-4 pb-3 border-b border-gray-200 dark:border-gray-800">
         <div className="flex flex-wrap gap-2">
           {SUMMARY_LEVELS.map((level) => {
             const isActive = activeLevel === level.key;
             const isAvailable = availableSet.has(level.key);
-            const isPending = isSummarizing && !isAvailable;
             const isFull = level.key === "full";
+            // Non-full tabs: clickable as soon as available in availableSet
+            // Full tab: clickable once isDone (on-demand generation)
             const isClickable = isAvailable || (isFull && isDone);
+            // Show spinner on tabs that are still being generated
+            const isLevelPending = isSummarizing && !isAvailable && !isFull;
             return (
               <button
                 key={level.key}
                 disabled={!isClickable}
-                onClick={() => setActiveLevel(level.key)}
+                onClick={() => { userSelectedRef.current = true; setActiveLevel(level.key); }}
                 className={cn(
                   "relative flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12px] font-medium transition-all border",
                   "disabled:opacity-40 disabled:cursor-not-allowed",
@@ -256,7 +495,7 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
                 >
                   {level.pct}
                 </span>
-                {isPending && (
+                {isLevelPending && (
                   <span className="w-3 h-3 rounded-full border border-current border-t-transparent animate-spin opacity-60" />
                 )}
                 {isFull && fullGenerating && (
@@ -270,6 +509,17 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
 
       {/* Scrollable content area */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
+        {/* Stream error — SSE disconnect is not a real error, polling still works. Hide from user. */}
+
+        {/* Timeout info banner — gentle hint, not an error */}
+        {streamTimeout && isStreaming && (
+          <div className="mb-4 p-3 rounded-xl bg-zinc-50 border border-zinc-200 dark:bg-zinc-800/40 dark:border-zinc-700">
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+              内容生成中，请耐心等待...
+            </p>
+          </div>
+        )}
+
         {/* Not ready state */}
         {!isDone && !isSummarizing && (
           <div className="flex flex-col items-center justify-center h-40 gap-2">
@@ -281,13 +531,8 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
         )}
 
         {/* Summarizing but nothing ready yet — show streaming content if available */}
-        {isSummarizing && availableSet.size === 0 && !isInitialStreaming && (
-          <div className="flex flex-col items-center justify-center h-40 gap-2">
-            <div className="w-5 h-5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin opacity-60" />
-            <p className="text-sm text-gray-400 dark:text-gray-500">
-              摘记生成中，稍候片刻...
-            </p>
-          </div>
+        {isSummarizing && availableSet.size === 0 && !streamingSummary && !activeLevel && (
+          <MascotLoading scene="thinking" message="猹正在整理摘记..." />
         )}
 
         {/* Prompt to select a level */}
@@ -322,35 +567,33 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
 
         {/* Full generating progress */}
         {isFullOnDemand && fullGenerating && (
-          <div className="flex flex-col items-center justify-center h-52 gap-4">
-            <CircleNotch size={32} weight="bold" className="text-violet-500 animate-spin" />
-            <div className="text-center">
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">完整文稿生成中</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">后台整理中，完成后会自动显示，你可以先查看其他级别</p>
-            </div>
-          </div>
+          <MascotLoading scene="thinking" message="完整文稿生成中，完成后会自动显示" />
         )}
 
-        {/* Loading skeleton */}
-        {activeLevel && !isFullOnDemand && isLoading && (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
-            <span className="ml-2.5 text-sm text-gray-400">加载中...</span>
-          </div>
+        {/* Active level is still generating — show inline generating placeholder */}
+        {activeLevel && !isFullOnDemand && isActiveLevelGenerating && !streamingSummary && (
+          <MascotLoading scene="thinking" message={`「${SUMMARY_LEVELS.find((l) => l.key === activeLevel)?.label}」正在生成中...`} />
         )}
 
-        {/* Error state */}
-        {activeLevel && !isFullOnDemand && isError && (
-          <p className="text-red-500 text-sm py-4 text-center">
-            加载失败: {(error as Error)?.message || "未知错误"}
-          </p>
+        {/* Loading skeleton — show when fetching already-available data */}
+        {activeLevel && !isFullOnDemand && !streamingSummary && !isActiveLevelGenerating && (isLoading || (!summary && !isStreaming && !shouldShowError)) && (
+          <LoadingPlaceholder message={isSummarizing ? "摘要生成中..." : "加载中..."} />
+        )}
+
+        {/* Error state — only show when we're confident it's a real error */}
+        {activeLevel && !isFullOnDemand && shouldShowError && !isLoading && !isActiveLevelGenerating && (
+          <div className="py-4 text-center">
+            <p className="text-zinc-400 dark:text-zinc-500 text-sm">
+              内容暂时不可用，请刷新页面重试
+            </p>
+          </div>
         )}
 
         {/* Content */}
         <AnimatePresence mode="wait">
-          {activeLevel && (summary || isStreaming || isInitialStreaming) && !isLoading && !isFullOnDemand && (
+          {activeLevel && (summary || isStreaming || (!!streamingSummary && !summary)) && !isLoading && !isFullOnDemand && (!isActiveLevelGenerating || !!streamingSummary) && (
             <motion.div
-              key={`${activeLevel}-${summary?.id ?? "streaming"}`}
+              key={currentKey}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
@@ -359,13 +602,13 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
             >
               {/* Meta toolbar */}
               <div className="flex items-center gap-2 flex-wrap text-[11px]">
-                {summary?.cached && !isStreaming && !isInitialStreaming && (
+                {summary?.cached && !isStreaming && !(streamingSummary && !summary?.content) && (
                   <span className="flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     已缓存
                   </span>
                 )}
-                {(isStreaming || isInitialStreaming) && (
+                {(isStreaming || (!!streamingSummary && !summary?.content)) && (
                   <span className="flex items-center gap-1 rounded-full bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 px-2.5 py-1 font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
                     生成中
@@ -416,17 +659,35 @@ export default function SummaryPanel({ videoId, videoTitle, thumbnail, isDone, c
 
               {/* Prose container */}
               <div className="rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 p-4">
-                <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] leading-[1.85]
-                  prose-headings:text-gray-900 dark:prose-headings:text-gray-100
-                  prose-p:text-gray-700 dark:prose-p:text-gray-300
-                  prose-strong:text-gray-900 dark:prose-strong:text-gray-100
-                  prose-li:text-gray-700 dark:prose-li:text-gray-300
-                  prose-a:text-violet-600 dark:prose-a:text-violet-400
-                  prose-code:text-violet-700 dark:prose-code:text-violet-300
-                  prose-code:bg-violet-50 dark:prose-code:bg-violet-900/30
-                  prose-code:rounded prose-code:px-1 prose-code:py-0.5">
-                  <ReactMarkdown>{isStreaming ? (streamingContent || "") : isInitialStreaming ? initialStreamContent : (summary?.content ?? "")}</ReactMarkdown>
-                </div>
+                {((streamingSummary && !summary?.content && !streamingSummary.trim()) || (isStreaming && !streamingContent)) ? (
+                  <div className="flex flex-col items-center justify-center py-8 gap-3">
+                    <img src={cdnUrl("/mascot/icon_thinking.gif")} alt="" className="w-20 h-20 object-contain" />
+                    <p className="text-sm text-zinc-400 font-medium">猹正在组织语言...</p>
+                  </div>
+                ) : (
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] leading-[1.85]
+                    prose-headings:text-gray-900 dark:prose-headings:text-gray-100
+                    prose-p:text-gray-700 dark:prose-p:text-gray-300
+                    prose-strong:text-gray-900 dark:prose-strong:text-gray-100
+                    prose-li:text-gray-700 dark:prose-li:text-gray-300
+                    prose-a:text-violet-600 dark:prose-a:text-violet-400
+                    prose-code:text-violet-700 dark:prose-code:text-violet-300
+                    prose-code:bg-violet-50 dark:prose-code:bg-violet-900/30
+                    prose-code:rounded prose-code:px-1 prose-code:py-0.5">
+                    <StreamingMarkdown
+                      content={
+                        (streamingSummary && !summary?.content) ? streamingSummary
+                        : isStreaming ? (streamingContent || "")
+                        : (summary?.content ?? "")
+                      }
+                      isStreaming={isStreaming || (!!streamingSummary && !summary?.content)}
+                    />
+                  </div>
+                )}
+                {/* Streaming indicator - show when content is being streamed */}
+                {(isStreaming || (!!streamingSummary && !summary?.content)) && (streamingContent || streamingSummary) && (
+                  <StreamingIndicator className="mt-3" />
+                )}
               </div>
             </motion.div>
           )}

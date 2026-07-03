@@ -142,10 +142,12 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
   const renderMarkmap = useCallback(async (markdown: string) => {
     if (!svgRef.current || !containerRef.current) return;
 
-    // Read actual rendered dimensions from the container DOM element
-    const rect = containerRef.current.getBoundingClientRect();
-    const width = rect.width || containerRef.current.offsetWidth;
-    const height = rect.height || containerRef.current.offsetHeight;
+    // Read actual rendered dimensions from the container DOM element.
+    // offsetWidth/offsetHeight are CSS pixels (unaffected by browser zoom),
+    // unlike getBoundingClientRect() which returns zoom-scaled screen pixels —
+    // SVG width/height attributes need CSS pixels.
+    const width = containerRef.current.offsetWidth || containerRef.current.getBoundingClientRect().width;
+    const height = containerRef.current.offsetHeight || containerRef.current.getBoundingClientRect().height;
 
     // Container not yet in the layout (e.g. parent tab is display:none) — save
     // for later so ResizeObserver can flush it once the tab becomes visible.
@@ -184,9 +186,6 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
       svgRef.current.setAttribute("height", String(effectiveHeight));
 
       const transformer = new Transformer();
-      // 禁用 HTML 解析，防止 LLM 生成的内容注入脚本（存储型 XSS）
-      const md = transformer.md as { set?: (opts: { html: boolean }) => void };
-      md?.set?.({ html: false });
       const { root } = transformer.transform(cleanMarkdown);
 
       // Destroy previous instance and clear SVG children
@@ -206,6 +205,7 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
         autoFit: true,
         duration: 300,
         initialExpandLevel: 3,
+        zoom: true,
       });
 
       mmRef.current.setData(root);
@@ -215,12 +215,15 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
       // Give markmap one animation frame to paint before fitting + wiring clicks
       setTimeout(() => {
         if (mmRef.current) {
-          // Re-sync SVG size in case the container shifted during async import
+          // Re-sync SVG size in case the container shifted during async import.
+          // Use offsetWidth/offsetHeight (CSS pixels) so it stays correct under
+          // browser zoom.
           if (svgRef.current && containerRef.current) {
-            const r = containerRef.current.getBoundingClientRect();
-            if (r.width > 0) {
-              svgRef.current.setAttribute("width", String(r.width));
-              svgRef.current.setAttribute("height", String(r.height));
+            const w = containerRef.current.offsetWidth;
+            const h = containerRef.current.offsetHeight;
+            if (w > 0) {
+              svgRef.current.setAttribute("width", String(w));
+              svgRef.current.setAttribute("height", String(h));
             }
           }
           mmRef.current.fit();
@@ -229,6 +232,7 @@ export default function MindmapPanel({ videoId, isDone, segments }: MindmapPanel
       }, 350);
     } catch (err) {
       console.error("Mindmap render failed:", err);
+      setLoadError(err instanceof Error ? err.message : "渲染失败");
     }
   }, [attachClickHandlers]);
 

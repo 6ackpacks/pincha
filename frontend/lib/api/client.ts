@@ -1,18 +1,63 @@
+import type { SyntheticEvent } from "react";
+
 // Use relative path by default so requests go through nginx proxy in Docker.
 // Only use NEXT_PUBLIC_API_URL if explicitly set (e.g. local dev without nginx).
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
+/** Thumbnail size tier. `thumb` (mqdefault, 320×180) for lists; `full` (maxresdefault, 1280×720) for detail/hero. */
+export type ThumbnailQuality = "thumb" | "full";
+
+// Hosts whose thumbnail filename we may downscale/upscale.
+const YT_THUMB_HOSTS = ["i.ytimg.com", "img.youtube.com"];
+// Hosts that must be proxied through the backend (blocked from the browser).
+const PROXY_HOSTS = ["i.ytimg.com", "img.youtube.com", "hdslb.com"];
+
+// Matches the filename segment of a YouTube thumbnail URL, e.g. `/maxresdefault.jpg`.
+const YT_THUMB_FILE = /\/(maxresdefault|hq720|sddefault|hqdefault|mqdefault|default)(\.[a-zA-Z]+)/;
+
 /**
- * Proxy YouTube thumbnails through the backend to avoid direct
+ * Proxy YouTube/Bilibili thumbnails through the backend to avoid direct
  * connections to blocked domains from the browser.
+ *
+ * For YouTube thumbnail hosts (i.ytimg.com / img.youtube.com) the filename
+ * is rewritten to the requested size tier:
+ *   - "thumb" (default) → mqdefault.jpg  (320×180, native 16:9, a few KB — list use)
+ *   - "full"            → maxresdefault.jpg (1280×720 — detail / hero use)
+ * Other hosts (e.g. hdslb.com) keep their original URL and are only proxied.
  */
-export function proxyThumbnail(url: string | null | undefined): string | null {
+export function proxyThumbnail(
+  url: string | null | undefined,
+  quality: ThumbnailQuality = "thumb",
+): string | null {
   if (!url) return null;
-  const blocked = ["i.ytimg.com", "img.youtube.com", "hdslb.com"];
-  if (blocked.some((h) => url.includes(h))) {
-    return `${API_BASE}/img-proxy?url=${encodeURIComponent(url)}`;
+
+  let out = url;
+  if (YT_THUMB_HOSTS.some((h) => url.includes(h))) {
+    const target = quality === "full" ? "maxresdefault" : "mqdefault";
+    out = url.replace(YT_THUMB_FILE, `/${target}$2`);
   }
-  return url;
+
+  if (PROXY_HOSTS.some((h) => out.includes(h))) {
+    return `${API_BASE}/img-proxy?url=${encodeURIComponent(out)}`;
+  }
+  return out;
+}
+
+/**
+ * onError handler for YouTube `maxresdefault` thumbnails: falls back to
+ * `hqdefault` once (which always exists), guarded against infinite loops.
+ * Mirrors lite-youtube-embed's behavior. No-op for non-maxres URLs.
+ */
+export function youtubeThumbnailFallback(
+  e: SyntheticEvent<HTMLImageElement>,
+): void {
+  const img = e.currentTarget;
+  if (img.dataset.thumbFallbackApplied) return;
+  const next = img.src.replace("maxresdefault", "hqdefault");
+  if (next !== img.src) {
+    img.dataset.thumbFallbackApplied = "1";
+    img.src = next;
+  }
 }
 
 /**
@@ -39,6 +84,7 @@ export interface ProgressData {
   state: string;
   progress: number;
   message: string;
+  error_code?: string;
 }
 
 /**
@@ -105,24 +151,6 @@ export function subscribeProgress(
   return cleanup;
 }
 
-// Guard against multiple concurrent 401s all triggering a redirect.
-let redirectingToLogin = false;
-
-/**
- * Redirect to the login page on an unrecoverable 401.
- *
- * The session JWT cannot be refreshed — the only way to obtain a new token is
- * to re-run the Watcha OAuth flow via /login — so an expired/invalid session
- * means the user must log in again. The auth cookie is HttpOnly, so there is
- * nothing to clear client-side; the backend issues a fresh cookie on callback.
- */
-function redirectToLogin(): void {
-  if (typeof window === "undefined" || redirectingToLogin) return;
-  if (window.location.pathname.startsWith("/login")) return;
-  redirectingToLogin = true;
-  window.location.href = "/login";
-}
-
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -138,10 +166,15 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     headers: mergedHeaders,
   });
 
-  if (!res.ok) {
-    if (res.status === 401) {
-      redirectToLogin();
+  if (res.status === 401) {
+    // Session expired or revoked — redirect to login
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
     }
+    throw new Error("未登录");
+  }
+
+  if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed: ${res.status}`);
   }

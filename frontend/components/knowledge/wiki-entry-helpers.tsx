@@ -3,8 +3,8 @@
 import React from "react";
 import dynamic from "next/dynamic";
 
-const RelationGraph = dynamic(
-  () => import("./relation-graph").then((mod) => mod.RelationGraph),
+const RelationGraph3D = dynamic(
+  () => import("./relation-graph-3d").then((mod) => mod.RelationGraph3D),
   { ssr: false, loading: () => <div className="flex justify-center py-20"><div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" /></div> },
 );
 
@@ -31,6 +31,76 @@ export function titleToSlug(title: string): string {
     .replace(/\s+/g, "-")
     .replace(/[^\w\u4e00-\u9fff-]/g, "")
     .slice(0, 80);
+}
+
+export function normalizeWikiTarget(target: string): string {
+  let decoded = target;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    decoded = target;
+  }
+  decoded = decoded.trim();
+  if (!decoded) return "";
+
+  const stripped = decoded
+    .replace(/^wiki:/i, "")
+    .replace(/^\/?knowledge\/?/i, "")
+    .replace(/^\/+|\/+$/g, "");
+
+  if (!stripped) return "";
+
+  if (/^[\w\u4e00-\u9fff-]+$/i.test(stripped) && !/\s/.test(stripped)) {
+    return stripped.toLowerCase();
+  }
+
+  return titleToSlug(stripped);
+}
+
+export interface WikiTargetIndexEntry {
+  title: string;
+  slug: string;
+}
+
+function normalizeTitleKey(title: string): string {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function resolveWikiTargetSlug(
+  target: string,
+  pages: WikiTargetIndexEntry[] | undefined,
+  options: { display?: string; currentSlug?: string | null } = {},
+): string {
+  const fallbackSlug = normalizeWikiTarget(target);
+  const currentSlug = options.currentSlug ? normalizeWikiTarget(options.currentSlug) : "";
+  const display = options.display?.trim();
+
+  if (!pages?.length) return fallbackSlug;
+
+  const slugMap = new Map<string, string>();
+  const titleMap = new Map<string, string>();
+  for (const page of pages) {
+    slugMap.set(normalizeWikiTarget(page.slug), page.slug);
+    titleMap.set(normalizeTitleKey(page.title), page.slug);
+  }
+
+  const slugMatch = slugMap.get(fallbackSlug);
+  const titleMatch = titleMap.get(normalizeTitleKey(target));
+  const resolvedTarget = slugMatch || titleMatch || fallbackSlug;
+
+  if (!display) return resolvedTarget;
+
+  const displaySlug = normalizeWikiTarget(display);
+  const displayMatch =
+    slugMap.get(displaySlug) ||
+    titleMap.get(normalizeTitleKey(display));
+
+  if (displayMatch && displayMatch !== resolvedTarget) {
+    if (!slugMatch && !titleMatch) return displayMatch;
+    if (currentSlug && normalizeWikiTarget(resolvedTarget) === currentSlug) return displayMatch;
+  }
+
+  return resolvedTarget;
 }
 
 /** Generate a heading anchor ID from heading text (supports Chinese characters). */
@@ -83,15 +153,17 @@ export function SkeletonLoader() {
 // Welcome state (Graph Overview)
 // ---------------------------------------------------------------------------
 
-export function GraphOverview({ onSelectSlug }: { onSelectSlug: (slug: string) => void }) {
+export function GraphOverview({ activeSlug, onSelectSlug }: { activeSlug?: string | null; onSelectSlug: (slug: string) => void }) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="px-6 pt-6 pb-3 shrink-0">
         <h2 className="text-lg font-bold text-zinc-800">知识图谱</h2>
         <p className="text-xs text-zinc-400 mt-0.5">点击节点查看词条详情</p>
       </div>
-      <div className="flex-1 min-h-0 px-6 pb-6">
-        <RelationGraph onSelectSlug={onSelectSlug} />
+      <div className="flex-1 min-h-0 px-2 pb-2">
+        <div className="h-full rounded-2xl overflow-hidden">
+          <RelationGraph3D activeSlug={activeSlug} onSelectSlug={onSelectSlug} />
+        </div>
       </div>
     </div>
   );

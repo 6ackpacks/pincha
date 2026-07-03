@@ -1,7 +1,17 @@
 "use client";
 
-import { useMemo } from "react";
 import DOMPurify from "isomorphic-dompurify";
+import { useMemo } from "react";
+
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [
+    "p", "br", "strong", "em", "a", "ul", "ol", "li",
+    "h1", "h2", "h3", "h4", "img", "blockquote", "code", "pre",
+    "figure", "hr", "u", "s", "mark", "span",
+  ],
+  ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "target", "rel"],
+  ALLOW_DATA_ATTR: false,
+};
 
 interface ProseMirrorNode {
   type: string;
@@ -43,10 +53,12 @@ export function ProseMirrorRenderer({ content, className }: Props) {
 
   if (!html) return null;
 
+  const sanitizedHtml = DOMPurify.sanitize(html, SANITIZE_CONFIG);
+
   return (
     <article
       className={`pm-content ${className ?? ""}`}
-      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   );
 }
@@ -85,12 +97,16 @@ function renderNode(node: ProseMirrorNode): string {
     case "image": {
       const src = node.attrs?.src as string;
       const alt = (node.attrs?.alt as string) || "";
-      return src ? `<img src="${esc(src)}" alt="${esc(alt)}" />` : "";
+      if (!src || !SAFE_IMG_SRC_PATTERN.test(src)) return "";
+      return `<img src="${esc(src)}" alt="${esc(alt)}" loading="lazy" decoding="async" />`;
     }
 
     case "figure": {
       const src = node.attrs?.src as string;
-      if (src) return `<figure><img src="${esc(src)}" alt="" /></figure>`;
+      if (src) {
+        if (!SAFE_IMG_SRC_PATTERN.test(src)) return "";
+        return `<figure><img src="${esc(src)}" alt="" loading="lazy" decoding="async" /></figure>`;
+      }
       return `<figure>${renderNodes(node.content || [])}</figure>`;
     }
 
@@ -123,7 +139,8 @@ function renderInline(nodes?: ProseMirrorNode[]): string {
     }
     if (node.type === "image") {
       const src = node.attrs?.src as string;
-      return src ? `<img src="${esc(src)}" alt="" class="inline-img" />` : "";
+      if (!src || !SAFE_IMG_SRC_PATTERN.test(src)) return "";
+      return `<img src="${esc(src)}" alt="" class="inline-img" loading="lazy" decoding="async" />`;
     }
     if (node.content) return renderNodes(node.content);
     return "";
@@ -131,6 +148,7 @@ function renderInline(nodes?: ProseMirrorNode[]): string {
 }
 
 const SAFE_URL_PATTERN = /^(https?:\/\/|mailto:)/i;
+const SAFE_IMG_SRC_PATTERN = /^https?:\/\//i;
 
 function renderText(node: ProseMirrorNode): string {
   let html = esc(node.text || "");

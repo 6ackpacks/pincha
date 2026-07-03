@@ -21,12 +21,41 @@ import {
   type ArticleSummary,
 } from "@/lib/api/articles";
 import { KnowledgeQAPanel } from "@/components/knowledge/qa-panel";
-import { STATE_LABELS } from "@/lib/constants";
+import { STATE_LABELS, UI_LABELS } from "@/lib/constants";
 import { KBSwitcher } from "@/components/knowledge/kb-switcher";
 import { activeKbIdAtom } from "@/atoms/kb";
 import { useAtom } from "jotai";
 import { cn, stripMarkdown } from "@/lib/utils";
+import { cdnUrl } from "@/lib/cdn";
 import DOMPurify from "dompurify";
+
+// ---------------------------------------------------------------------------
+// URL validation — block self-links and non-http(s) URLs before submitting
+// ---------------------------------------------------------------------------
+
+// 品猹自身域名：内容来自这些站点不应作为外部线索导入（会处理失败）
+const SELF_HOSTS = ["watcha.cn", "pincha.watcha.cn"];
+
+function getUrlHost(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isSelfHost(host: string): boolean {
+  return SELF_HOSTS.some((h) => host === h || host.endsWith("." + h));
+}
+
+/** Returns a Chinese error message if the URL is invalid/unsupported, else null. */
+function validateClueUrl(url: string): string | null {
+  if (!/^https?:\/\//i.test(url)) return UI_LABELS.ERROR_INVALID_URL;
+  const host = getUrlHost(url);
+  if (!host) return UI_LABELS.ERROR_INVALID_URL;
+  if (isSelfHost(host)) return "不支持品猹自身链接，请使用外部内容链接";
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Import Drawer
@@ -85,8 +114,11 @@ function ImportDrawer({
   const handleSubmit = () => {
     setError("");
     if (tab === "url") {
-      if (!url.trim()) return setError("请输入 URL");
-      createMutation.mutate({ source_type: "url", source_url: url.trim(), title: title.trim() || undefined });
+      const trimmedUrl = url.trim();
+      if (!trimmedUrl) return setError("请输入 URL");
+      const urlError = validateClueUrl(trimmedUrl);
+      if (urlError) return setError(urlError);
+      createMutation.mutate({ source_type: "url", source_url: trimmedUrl, title: title.trim() || undefined });
     } else {
       if (!text.trim()) return setError("请输入想留下的文本");
       createMutation.mutate({ source_type: "text", title: title.trim() || undefined, content: text.trim() });
@@ -175,8 +207,9 @@ function ImportDrawer({
             <div className="p-6">
               <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-3">已收录线索</h3>
               {articlesQuery.isLoading ? (
-                <div className="flex justify-center py-10">
-                  <CircleNotch size={20} weight="bold" className="animate-spin text-zinc-500" />
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <img src={cdnUrl("/mascot/cha_star.gif")} alt="" className="w-20 h-20 object-contain" />
+                  <p className="text-sm text-zinc-400 font-medium">猹正在加载知识库...</p>
                 </div>
               ) : (articlesQuery.data ?? []).length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">

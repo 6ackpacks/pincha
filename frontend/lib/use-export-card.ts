@@ -11,6 +11,8 @@ export function useExportCard() {
     try {
       const dataUrl = await domToPng(element, {
         scale: 3,
+        width: element.offsetWidth,
+        height: element.offsetHeight,
       });
       const link = document.createElement("a");
       link.download = `${filename}.png`;

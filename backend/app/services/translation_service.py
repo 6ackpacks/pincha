@@ -55,7 +55,7 @@ async def translate_segments(
     db: AsyncSession,
     video_id: uuid.UUID,
     segment_indices: list[int],
-    target_lang: str = "en",
+    target_lang: str = "auto",
 ) -> TranslateResponse:
     """Translate requested segments, using DB cache for already-translated ones."""
     result = await db.execute(
@@ -65,10 +65,19 @@ async def translate_segments(
     if transcript is None:
         raise ValueError(f"Transcript not found for video {video_id}")
 
-    # Auto-detect translation direction from transcript language
+    # Default direction: translate into Chinese (中文用户优先).
+    # auto 不再做双向翻译，而是统一译成中文；英文视频译成中文，中文视频由下方守卫跳过。
     source_lang = transcript.language or "zh"
     if target_lang == "auto":
-        target_lang = "en" if source_lang == "zh" else "zh"
+        target_lang = "zh"
+
+    # 原文已是目标语言，无需翻译：
+    #   中文视频 + 英译中 / 英文视频 + 中译英
+    # 直接返回空结果，不调 LLM、不写 DB。
+    if target_lang == source_lang:
+        return TranslateResponse(
+            video_id=video_id, translations={}, from_cache=[]
+        )
 
     segments = transcript.segments or []
     segments_en = list(transcript.segments_en or [None] * len(segments))

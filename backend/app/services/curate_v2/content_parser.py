@@ -6,15 +6,29 @@ returned by watcha.cn's content API.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
-def extract_plain_text(content_json: dict[str, Any] | str | None) -> str:
+def extract_plain_text(content_json: Any) -> str:
     """Recursively extract text from ProseMirror JSON nodes."""
     if not content_json:
         return ""
     if isinstance(content_json, str):
-        return content_json
+        stripped = content_json.strip()
+        if not stripped:
+            return ""
+        if stripped[0] in "[{":
+            try:
+                return extract_plain_text(json.loads(stripped))
+            except (TypeError, ValueError):
+                return stripped
+        return stripped
+    if isinstance(content_json, list):
+        parts: list[str] = []
+        for child in content_json:
+            _walk_text(child, parts)
+        return "\n".join(parts).strip()
 
     parts: list[str] = []
     _walk_text(content_json, parts)
@@ -25,6 +39,10 @@ def _walk_text(node: Any, parts: list[str]) -> None:
     """Depth-first walk collecting text content."""
     if isinstance(node, str):
         parts.append(node)
+        return
+    if isinstance(node, list):
+        for child in node:
+            _walk_text(child, parts)
         return
     if not isinstance(node, dict):
         return

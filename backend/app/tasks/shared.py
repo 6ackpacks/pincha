@@ -53,7 +53,7 @@ _sync_engine: Engine | None = None
 
 
 def _resolve_database_url() -> str:
-    """Resolve sync database URL from environment (supports PaaS platform readonly vars)."""
+    """Resolve sync database URL from environment (supports PaaS fallback vars)."""
     # Priority: DATABASE_URL > POSTGRES_URI > settings default
     db_url = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URI") or settings.DATABASE_URL
     # Convert async driver to sync
@@ -75,38 +75,42 @@ def get_sync_engine() -> Engine:
     return _sync_engine
 
 
-# --- Async DB engine (singleton) ---
-
-_async_engine = None
-_AsyncSessionLocal = None
-
-
 def get_async_engine():
-    """Module-level async engine singleton for Celery tasks.
+    """Create an async engine/sessionmaker pair for the current Celery async run.
 
-    Returns (engine, sessionmaker) tuple. The engine lives for the process
-    lifetime — do NOT call dispose() on it.
+    Celery task code calls ``asyncio.run()`` repeatedly, which creates a fresh
+    event loop each time. Reusing a process-global async engine across those
+    loops can leave asyncpg futures bound to an earlier loop and crash with
+    "Future attached to a different loop".
+
+    Keep the sync engine pooled process-wide, but create/dispose the async
+    engine per async task entry so connections stay bound to the current loop.
     """
-    global _async_engine, _AsyncSessionLocal
-    if _async_engine is None:
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-        from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
 
-        _async_engine = create_async_engine(
-            settings.DATABASE_URL, echo=False, pool_pre_ping=True
-        )
-        _AsyncSessionLocal = sessionmaker(
-            _async_engine, class_=AsyncSession, expire_on_commit=False
-        )
-    return _async_engine, _AsyncSessionLocal
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
+    session_local = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    return engine, session_local
 
 
 @asynccontextmanager
 async def get_async_session():
     """Async session context manager for Celery tasks."""
-    _, SessionLocal = get_async_engine()
-    async with SessionLocal() as session:
-        yield session
+    engine, SessionLocal = get_async_engine()
+    try:
+        async with SessionLocal() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 # --- Sync Redis client (singleton) ---
@@ -115,7 +119,7 @@ _sync_redis: redis.Redis | None = None
 
 
 def _resolve_redis_url() -> str:
-    """Resolve Redis URL from environment (supports PaaS platform readonly vars)."""
+    """Resolve Redis URL from environment (supports PaaS fallback vars)."""
     url = os.getenv("REDIS_URL") or os.getenv("REDIS_URI") or os.getenv("REDIS_CONNECTION_STRING")
     return url if url else settings.REDIS_URL
 

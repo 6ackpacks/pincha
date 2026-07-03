@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Warning,
@@ -8,13 +8,15 @@ import {
   PencilSimple, Trash, FloppyDisk, X,
 } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
-import { getWikiPage, updateWikiPage, deleteWikiPage } from "@/lib/api/wiki";
+import { useAtom } from "jotai";
+import { activeKbIdAtom } from "@/atoms/kb";
+import { getWikiGraph, getWikiPage, updateWikiPage, deleteWikiPage } from "@/lib/api/wiki";
 import { cn } from "@/lib/utils";
 import { WikiLinkPreview } from "./wiki-link-preview";
 import { WikiCardExport } from "./wiki-card-export";
 import { WikiEntrySidebar } from "./wiki-entry-sidebar";
 import {
-  titleToSlug,
+  resolveWikiTargetSlug,
   headingToAnchor,
   extractTextFromChildren,
   SkeletonLoader,
@@ -38,6 +40,7 @@ interface WikiEntryPanelProps {
 
 export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiEntryPanelProps) {
   const qc = useQueryClient();
+  const [activeKbId] = useAtom(activeKbIdAtom);
 
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -46,13 +49,25 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
   const [editTags, setEditTags] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const pageQuery = useQuery({
     queryKey: ["wiki-page", slug],
     queryFn: () => getWikiPage(slug!),
     enabled: !!slug,
   });
+
+  const graphQuery = useQuery({
+    queryKey: ["wiki-graph", activeKbId],
+    queryFn: getWikiGraph,
+    enabled: !!slug,
+    staleTime: 30 * 1000,
+  });
+
+  const targetIndex = useMemo(
+    () => graphQuery.data?.nodes.map((node) => ({ title: node.title, slug: node.slug })),
+    [graphQuery.data],
+  );
 
   const updateMutation = useMutation({
     mutationFn: (data: Parameters<typeof updateWikiPage>[1]) =>
@@ -114,7 +129,10 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
   // Parse [[WikiLink]] syntax and wire clicks to onSelectSlug
   function parseWikiLinks(content: string): string {
     return content.replace(/\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g, (_, target, heading, display) => {
-      const wikiSlug = titleToSlug(target.trim());
+      const wikiSlug = resolveWikiTargetSlug(target.trim(), targetIndex, {
+        display: display?.trim(),
+        currentSlug: slug,
+      });
       const anchor = heading ? headingToAnchor(heading.trim()) : "";
       const label = display ? display.trim() : heading ? `${target.trim()}#${heading.trim()}` : target.trim();
       const href = anchor ? `wiki:${wikiSlug}#${anchor}` : `wiki:${wikiSlug}`;
@@ -123,14 +141,31 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
   }
 
   if (!slug) {
-    return <GraphOverview onSelectSlug={onSelectSlug} />;
+    return <GraphOverview activeSlug={slug} onSelectSlug={onSelectSlug} />;
   }
 
   if (pageQuery.isLoading) {
     return <SkeletonLoader />;
   }
 
-  if (pageQuery.isError || !pageQuery.data) {
+  if (pageQuery.isError) {
+    const is404 = (pageQuery.error as any)?.status === 404;
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center p-8 bg-white rounded-2xl border border-red-100 shadow-sm max-w-sm">
+          <p className="text-red-500 font-bold mb-2">{is404 ? "知识词条不存在" : "概念内容加载失败"}</p>
+          <p className="text-xs text-zinc-400 mt-1">{is404 ? "该词条可能已被删除或链接有误" : "请稍后重试"}</p>
+          {!is404 && (
+            <button onClick={() => pageQuery.refetch()} className="mt-3 px-4 py-1.5 text-xs rounded-lg border border-zinc-200 text-zinc-600 hover:bg-zinc-50 transition-colors">
+              重试
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (!pageQuery.data) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center p-8 bg-white rounded-2xl border border-red-100 shadow-sm max-w-sm">
@@ -142,9 +177,10 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
   }
 
   const page = pageQuery.data;
+  const hasContent = page.content && page.content.trim().length > 0;
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollContainerRef} className="h-full overflow-y-auto">
       <div key={slug} className="flex h-full">
         {/* Main content */}
         <div className="flex-1 overflow-y-auto p-8 min-w-0">
@@ -334,6 +370,7 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
             ) : null}
 
             {/* Markdown content */}
+            {hasContent ? (
             <div className="prose prose-zinc prose-sm max-w-none
               prose-headings:font-bold prose-headings:text-zinc-900
               prose-h2:text-lg prose-h2:border-b prose-h2:border-zinc-100 prose-h2:pb-2
@@ -349,18 +386,26 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
                     if (href?.startsWith("wiki:")) {
                       const wikiPart = href.slice(5);
                       const hashIdx = wikiPart.indexOf("#");
-                      const targetSlug = hashIdx >= 0 ? wikiPart.slice(0, hashIdx) : wikiPart;
+                      const rawTarget = hashIdx >= 0 ? wikiPart.slice(0, hashIdx) : wikiPart;
+                      const linkLabel = extractTextFromChildren(children);
+                      const targetSlug = resolveWikiTargetSlug(rawTarget, targetIndex, {
+                        display: linkLabel,
+                        currentSlug: slug,
+                      });
                       const anchor = hashIdx >= 0 ? wikiPart.slice(hashIdx + 1) : null;
                       const handleWikiClick = () => {
-                        if (targetSlug === slug && anchor) {
-                          // Same page: just scroll to anchor
-                          const el = document.getElementById(anchor);
-                          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                        } else {
-                          // Different page: navigate and set pending anchor
-                          if (anchor) setPendingAnchor(anchor);
-                          onSelectSlug(targetSlug);
+                        if (!targetSlug) return;
+                        if (targetSlug === slug) {
+                          if (anchor) {
+                            const el = document.getElementById(anchor);
+                            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                          } else {
+                            scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                          }
+                          return;
                         }
+                        if (anchor) setPendingAnchor(anchor);
+                        onSelectSlug(targetSlug);
                       };
                       return (
                         <WikiLinkPreview slug={targetSlug} onClick={handleWikiClick}>
@@ -409,6 +454,11 @@ export function WikiEntryPanel({ slug, onSelectSlug, onClose, onDeleted }: WikiE
                 {parseWikiLinks(page.content)}
               </ReactMarkdown>
             </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-zinc-400 text-sm">该概念暂未生成详细内容</p>
+              </div>
+            )}
               </>
             )}
           </div>

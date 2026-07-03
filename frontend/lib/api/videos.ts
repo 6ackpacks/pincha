@@ -1,5 +1,6 @@
 import { request, getActiveKbHeaders, subscribeProgress } from "./client";
 import type { ProgressData } from "./client";
+import { createSSEConnection } from "../sse-client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -18,6 +19,7 @@ export interface VideoResponse {
   duration: string | null;
   status: VideoStatus;
   in_wiki: boolean;
+  in_library: boolean;
   created_at: string;
   show_name: string | null;
   host: string | null;
@@ -35,6 +37,23 @@ export function getTrendingVideos(limit = 20) {
 
 export function getPopularVideos(limit = 20) {
   return request<VideoResponse[]>(`/api/v1/videos/popular?limit=${limit}`);
+}
+
+export interface PublicVideoFullResponse {
+  video: VideoResponse;
+  transcript: TranscriptResponse | null;
+  summaries: SummaryResponse[];
+  mindmap: MindmapResponse | null;
+}
+
+export function getPublicVideoFull(id: string) {
+  return request<PublicVideoFullResponse>(`/api/v1/videos/public/${id}/full`);
+}
+
+export function addVideoToLibrary(id: string) {
+  return request<VideoResponse>(`/api/v1/videos/${id}/add-to-library`, {
+    method: "POST",
+  });
 }
 
 export function submitVideo(url: string, platform: "youtube" | "podcast") {
@@ -159,59 +178,26 @@ export function subscribeSummaryStream(
   onLevelReady: (level: string) => void,
   onDone: () => void,
 ): () => void {
-  const controller = new AbortController();
   const url = `${API_BASE}/api/v1/videos/${videoId}/summary/stream`;
 
-  (async () => {
-    try {
-      const res = await fetch(url, {
-        credentials: "include",
-        headers: getActiveKbHeaders(),
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
+  return createSSEConnection({
+    url,
+    onEvent: (event) => {
+      const { data } = event;
+      const type = (data.type as string) || event.type;
+
+      if (type === "delta") {
+        onDelta((data.level as string) || "detailed", (data.delta as string) || "");
+      } else if (type === "level_ready") {
+        onLevelReady(data.level as string);
+      } else if (type === "done") {
         onDone();
-        return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6).trim();
-          if (!payload || payload === ": connected") continue;
-          try {
-            const data = JSON.parse(payload);
-            if (data.type === "delta") {
-              onDelta(data.level, data.delta);
-            } else if (data.type === "level_ready") {
-              onLevelReady(data.level);
-            } else if (data.type === "done") {
-              onDone();
-              return;
-            }
-          } catch {
-            // ignore malformed
-          }
-        }
-      }
-      onDone();
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return;
-      onDone();
-    }
-  })();
-
-  return () => controller.abort();
+    },
+    onError: () => onDone(),
+    onClose: () => onDone(),
+    maxRetries: 2,
+  });
 }
 
 export interface MindmapResponse {
@@ -233,8 +219,13 @@ export function regenerateMindmap(videoId: string) {
   });
 }
 
-export function deleteVideo(id: string) {
-  return request<void>(`/api/v1/videos/${id}`, { method: "DELETE" });
+export async function deleteVideo(id: string) {
+  try {
+    await request<void>(`/api/v1/videos/${id}`, { method: "DELETE" });
+  } catch (err) {
+    if (err instanceof Error && /not found/i.test(err.message)) return;
+    throw err;
+  }
 }
 
 export function reprocessVideo(id: string) {
@@ -347,4 +338,132 @@ export function subscribeVideoProgress(
     onDone,
     onError,
   );
+}
+
+/**
+ * Subscribe to the enhanced video SSE stream that emits named events:
+ * - message: progress heartbeat {state, progress, message}
+ * - subtitle_ready: subtitle generation complete
+ * - delta: streaming summary content {content, level}
+ * - level_ready: summary level complete {level}
+ * - mindmap_ready: mindmap generation complete
+ *
+ * Includes automatic reconnection with exponential backoff (up to 3 retries).
+ * When retries are exhausted, calls onFallbackToPolling so the consumer can
+ * switch to a REST polling strategy.
+ *
+ * Returns a cleanup function to close the EventSource and cancel pending retries.
+ */
+export interface VideoSSECallbacks {
+  onProgress?: (data: ProgressData) => void;
+  onSubtitleReady?: (data: { video_id: string; segment_count: number }) => void;
+  onDelta?: (data: SummaryStreamEvent) => void;
+  onLevelReady?: (data: { type: string; level: string }) => void;
+  onMindmapReady?: (data: { type: string; node_count: number }) => void;
+  /** Full content replacement (buffer-expired snapshot or non-streamed L2 result). */
+  onSnapshot?: (data: SummaryStreamEvent) => void;
+  /** Discard the current round's accumulated streamed content (fallback retry). */
+  onReset?: (data: SummaryStreamEvent) => void;
+  onDone?: () => void;
+  onError?: (err: Event) => void;
+  /** Called when SSE retries are exhausted; consumer should start polling */
+  onFallbackToPolling?: () => void;
+  /** Called with current connection status changes */
+  onConnectionStateChange?: (state: "connected" | "reconnecting" | "disconnected") => void;
+}
+
+/**
+ * A single summary-stream event as published by the backend PR2 protocol.
+ * `event_type` is authoritative; `type`/`level`/`delta` are legacy aliases kept
+ * for the older /summary/stream consumer. `seq` is the per-video monotonic
+ * sequence; `generation_id` identifies the generation round.
+ */
+export interface SummaryStreamEvent {
+  type?: string;
+  event_type?: "delta" | "snapshot" | "reset" | "done" | "failed" | "level_generated" | "phase";
+  content?: string;
+  delta?: string;
+  level?: string;
+  summary_level?: string;
+  seq?: number;
+  generation_id?: string | null;
+  is_replay?: boolean;
+  reason?: string;
+  attempt?: number;
+}
+
+export function subscribeVideoSSE(
+  videoId: string,
+  callbacks: VideoSSECallbacks,
+): () => void {
+  const sseUrl = `${API_BASE}/api/v1/videos/${videoId}/progress/stream`;
+
+  callbacks.onConnectionStateChange?.("connected");
+
+  return createSSEConnection({
+    url: sseUrl,
+    // Resume from the highest seen seq on reconnect (after_seq query +
+    // Last-Event-ID header) and dedup replayed frames inside the client.
+    resumeOnReconnect: true,
+    onEvent: (event) => {
+      const { type, data, id } = event;
+      // Surface the SSE id (= backend seq) on the payload so consumers can
+      // track the high-water mark even when the JSON omits/lags `seq`.
+      if (id !== undefined && id !== "" && (data as { seq?: unknown }).seq === undefined) {
+        const parsedId = Number(id);
+        if (Number.isFinite(parsedId)) (data as { seq?: number }).seq = parsedId;
+      }
+
+      switch (type) {
+        case "message": {
+          const progress = data as unknown as ProgressData;
+          callbacks.onProgress?.(progress);
+          if (progress.state === "done" || progress.state === "failed") {
+            callbacks.onDone?.();
+          }
+          break;
+        }
+        case "subtitle_ready":
+          callbacks.onSubtitleReady?.(data as { video_id: string; segment_count: number });
+          break;
+        case "delta":
+          callbacks.onDelta?.(data as SummaryStreamEvent);
+          break;
+        case "snapshot":
+          callbacks.onSnapshot?.(data as SummaryStreamEvent);
+          break;
+        case "reset":
+          callbacks.onReset?.(data as SummaryStreamEvent);
+          break;
+        case "level_ready":
+        case "level_generated":
+          callbacks.onLevelReady?.(data as { type: string; level: string });
+          break;
+        case "mindmap_ready":
+          callbacks.onMindmapReady?.(data as { type: string; node_count: number });
+          break;
+        case "done":
+          callbacks.onDone?.();
+          break;
+        case "failed":
+          callbacks.onDone?.();
+          break;
+        default:
+          // `phase` and any other progress-only events are ignored here.
+          break;
+      }
+    },
+    onError: (err) => {
+      callbacks.onError?.(err as unknown as Event);
+      callbacks.onConnectionStateChange?.("disconnected");
+      callbacks.onFallbackToPolling?.();
+    },
+    onReconnect: () => {
+      callbacks.onConnectionStateChange?.("reconnecting");
+    },
+    onClose: () => {
+      callbacks.onDone?.();
+    },
+    maxRetries: 3,
+  });
 }

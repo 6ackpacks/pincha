@@ -20,6 +20,7 @@ from app.services.curate_v2.classifier import classify_and_summarize, extract_da
 from app.services.curate_v2.fetcher import OFFICIAL_USER_IDS
 from app.services.curate_v2.picker import ClassifiedItem
 from app.services.curate_v2.scorer import ScoredItem
+from app.tasks.shared import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +79,11 @@ def classify_items(
         if scored.author_id == DAILY_BRIEF_AUTHOR_ID:
             _classify_daily_brief(scored, already_pushed_keys, classified_items)
         else:
-            classification = classify_and_summarize(
+            classification = run_async(classify_and_summarize(
                 title=scored.title,
                 content_text=scored.content_text,
                 source_type=scored.source_type,
-            )
+            ))
             classified_items.append(ClassifiedItem(
                 scored=scored,
                 channels=classification["channels"],
@@ -99,7 +100,7 @@ def _classify_daily_brief(
     classified_items: list[ClassifiedItem],
 ) -> None:
     """Extract individual items from a daily brief post."""
-    brief_items = extract_daily_brief_items(scored.content_text)
+    brief_items = run_async(extract_daily_brief_items(scored.content_text))
     if brief_items:
         for idx, brief in enumerate(brief_items):
             virtual_scored = copy(scored)

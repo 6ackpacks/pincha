@@ -43,13 +43,14 @@ interface SimLink {
 // ---------------------------------------------------------------------------
 
 const HEIGHT = 280;
-const CENTER_RADIUS = 4;
-const NODE_RADIUS = 2.5;
+const CENTER_RADIUS = 5;
+const NODE_RADIUS = 3;
 const CENTER_COLOR = "#34d399"; // emerald-400
 const HOVER_EDGE_COLOR = "rgba(52,211,153,0.8)";
 const LABEL_FONT = "11px system-ui, sans-serif";
-const MAX_LABEL_CHARS = 10;
+const MAX_LABEL_CHARS = 8;
 const MAX_VISIBLE_NODES = 12;
+const LABEL_BUDGET = 8;
 
 function truncLabel(title: string): string {
   return title.length > MAX_LABEL_CHARS ? title.slice(0, MAX_LABEL_CHARS) + "…" : title;
@@ -67,6 +68,7 @@ function springScale(elapsed: number): number {
 
 export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProps) {
   const [depth, setDepth] = useState<1 | 2>(1);
+  const [transitioning, setTransitioning] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
@@ -74,6 +76,7 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
   const nodesRef = useRef<SimNode[]>([]);
   const linksRef = useRef<SimLink[]>([]);
   const rafRef = useRef<number>(0);
+  const runningRef = useRef(false);
   const hoveredRef = useRef<string | null>(null);
   const widthRef = useRef(288);
 
@@ -84,7 +87,10 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
   // Effect 4: Node entrance spring animation
   const nodeEntryTimeRef = useRef<Map<string, number>>(new Map());
 
-  const { data } = useQuery({
+  // Keeps a stable handle to the latest render fn for use in the resize observer
+  const renderRef = useRef<() => void>(() => {});
+
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["local-graph", pageId, depth],
     queryFn: () => getLocalGraph(pageId, depth),
     enabled: !!pageId,
@@ -200,7 +206,8 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
 
       const sim = d3
         .forceSimulation<SimNode>(nodes)
-        .alphaDecay(0.06)
+        .alphaDecay(0.04)
+        .alphaMin(0.005)
         .velocityDecay(0.65)
         .force(
           "link",
@@ -215,26 +222,40 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
         .force(
           "collide",
           d3.forceCollide<SimNode>().radius((d) => d.radius + 12).strength(0.7),
-        );
+        )
+        .stop();
 
       simRef.current = sim;
 
-      // Render loop
+      // Start/stop RAF loop — stops when simulation cools
       cancelAnimationFrame(rafRef.current);
-      function draw() {
-        if (cancelled) return;
-        if (document.hidden) {
-          rafRef.current = requestAnimationFrame(draw);
-          return;
+      runningRef.current = false;
+
+      function startLoop() {
+        if (runningRef.current || cancelled) return;
+        runningRef.current = true;
+        function tick() {
+          if (cancelled || !runningRef.current) { runningRef.current = false; return; }
+          if (document.hidden) { rafRef.current = requestAnimationFrame(tick); return; }
+          sim.tick();
+          renderRef.current();
+          if (sim.alpha() < sim.alphaMin()) {
+            runningRef.current = false;
+            renderRef.current();
+            return;
+          }
+          rafRef.current = requestAnimationFrame(tick);
         }
-        render();
-        rafRef.current = requestAnimationFrame(draw);
+        rafRef.current = requestAnimationFrame(tick);
       }
-      rafRef.current = requestAnimationFrame(draw);
+
+      sim.alpha(1);
+      startLoop();
     });
 
     return () => {
       cancelled = true;
+      runningRef.current = false;
       cancelAnimationFrame(rafRef.current);
       if (simRef.current) {
         simRef.current.stop();
@@ -304,11 +325,37 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
       if (t - entryTime > 600) entryMap.delete(nid);
     }
 
-    // Draw edges with subtle curves
+    // --- Label budget: only the most important nodes get labels ---
+    // Priority: center → hovered → adjacent → by degree descending.
+    const degree = new Map<string, number>();
     for (const l of links) {
+      const sid = typeof l.source === "string" ? l.source : l.source.id;
+      const tid = typeof l.target === "string" ? l.target : l.target.id;
+      degree.set(sid, (degree.get(sid) || 0) + 1);
+      degree.set(tid, (degree.get(tid) || 0) + 1);
+    }
+    const labelSet = new Set<string>();
+    for (const n of nodes) {
+      if (n.isCenter) labelSet.add(n.id);
+    }
+    if (hovered) {
+      labelSet.add(hovered);
+      // Adjacent nodes always get labels regardless of budget.
+      for (const id of adjSet) labelSet.add(id);
+    }
+    const ranked = [...nodes].sort(
+      (a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0),
+    );
+    for (const n of ranked) {
+      if (labelSet.size >= LABEL_BUDGET) break;
+      labelSet.add(n.id);
+    }
+
+    // --- Draw a single edge as a curved path ---
+    const drawEdge = (l: SimLink) => {
       const s = typeof l.source === "string" ? nodes.find((n) => n.id === l.source) : l.source;
       const tgt = typeof l.target === "string" ? nodes.find((n) => n.id === l.target) : l.target;
-      if (!s || !tgt) continue;
+      if (!s || !tgt) return;
 
       const sid = s.id;
       const tid = tgt.id;
@@ -325,7 +372,7 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
       const my = (sy + ty) / 2;
       const dx = tx - sx;
       const dy = ty - sy;
-      const len = Math.sqrt(dx * dx + dy * dy);
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
       const curvature = 0.15;
       const cpx = mx + (-dy / len) * len * curvature;
       const cpy = my + (dx / len) * len * curvature;
@@ -334,22 +381,39 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
       ctx.moveTo(sx, sy);
       ctx.quadraticCurveTo(cpx, cpy, tx, ty);
 
+      // Dimmed edges fade out via globalAlpha instead of baked-in string alpha.
+      ctx.globalAlpha = isDimmed ? 1 - 0.6 * progress : 1;
+
       if (l.relationType === "contradicts") {
         ctx.setLineDash(isHighlighted ? [4, 3] : [3, 3]);
         ctx.lineDashOffset = isHighlighted ? -(t * 0.04) % 14 : -(t * 0.02) % 20;
-        const baseAlpha = isDimmed ? (0.3 - 0.25 * progress) : 0.4;
-        ctx.strokeStyle = `rgba(239,68,68,${baseAlpha})`;
+        ctx.strokeStyle = "rgba(239,68,68,0.45)";
       } else if (isHighlighted) {
         ctx.setLineDash([]);
         ctx.strokeStyle = HOVER_EDGE_COLOR;
       } else {
         ctx.setLineDash([]);
-        const baseAlpha = isDimmed ? (0.2 - 0.15 * progress) : 0.25;
-        ctx.strokeStyle = `rgba(148,163,184,${baseAlpha})`;
+        ctx.strokeStyle = "rgba(180,190,200,0.18)";
       }
-      ctx.lineWidth = isHighlighted ? 1.5 : 0.7;
+      ctx.lineWidth = isHighlighted ? 2 : 0.7;
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    };
+
+    // Draw non-highlighted edges first, highlighted edges last (on top).
+    for (const l of links) {
+      const sid = typeof l.source === "string" ? l.source : l.source.id;
+      const tid = typeof l.target === "string" ? l.target : l.target.id;
+      if (hovered && (sid === hovered || tid === hovered)) continue;
+      drawEdge(l);
+    }
+    if (hovered) {
+      for (const l of links) {
+        const sid = typeof l.source === "string" ? l.source : l.source.id;
+        const tid = typeof l.target === "string" ? l.target : l.target.id;
+        if (sid === hovered || tid === hovered) drawEdge(l);
+      }
     }
 
     // Draw nodes
@@ -385,14 +449,29 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
         ctx.restore();
       }
 
+      // --- Center node: subtle pulsing ring ---
+      if (n.isCenter) {
+        const pulse = Math.sin(t * 0.003) * 0.15 + 0.85;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = mixAlpha(color, 0.4 * pulse);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
       // Main node circle
       ctx.beginPath();
       ctx.arc(nx, ny, r, 0, Math.PI * 2);
       const nodeAlpha = isDimmed ? (1 - 0.7 * progress) : 1;
       ctx.fillStyle = nodeAlpha < 1 ? mixAlpha(color, nodeAlpha) : color;
       ctx.fill();
+      // Subtle white stroke for separation from background.
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = `rgba(255,255,255,${(0.9 * nodeAlpha).toFixed(2)})`;
+      ctx.stroke();
 
-      // Label
+      // Label — only nodes within the label budget get one.
+      if (!labelSet.has(n.id)) continue;
       const labelAlpha = isDimmed ? (1 - 0.7 * progress) : 1;
       const labelEntryAlpha = entryTime !== undefined ? Math.min(1, springScale(t - entryTime)) : 1;
       const finalLabelAlpha = labelAlpha * labelEntryAlpha;
@@ -407,6 +486,19 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
       }
     }
   }, []);
+
+  // Keep renderRef pointed at the latest render fn so the resize observer can
+  // trigger an immediate redraw without re-subscribing.
+  useEffect(() => {
+    renderRef.current = render;
+  }, [render]);
+
+  // Brief opacity fade when switching depth (1 ↔ 2)
+  useEffect(() => {
+    setTransitioning(true);
+    const id = window.setTimeout(() => setTransitioning(false), 150);
+    return () => window.clearTimeout(id);
+  }, [depth]);
 
   // Mouse interaction (drag + click distinction)
   useEffect(() => {
@@ -435,6 +527,7 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
     function onDown(e: MouseEvent) {
       const hit = hitTest(e);
       if (!hit) return;
+      if (hit.isCenter) return; // Don't allow dragging the root node
       dragNode = hit;
       hasDragged = false;
       dragStartX = e.clientX;
@@ -446,7 +539,24 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
         n.fy = n.y;
       }
       if (simRef.current) {
-        simRef.current.alphaTarget(0.3).restart();
+        simRef.current.alphaTarget(0.3).alpha(0.3);
+        if (!runningRef.current) {
+          runningRef.current = true;
+          const sim = simRef.current;
+          function tick() {
+            if (!runningRef.current) return;
+            if (document.hidden) { rafRef.current = requestAnimationFrame(tick); return; }
+            sim.tick();
+            renderRef.current();
+            if (sim.alpha() < sim.alphaMin() && sim.alphaTarget() === 0) {
+              runningRef.current = false;
+              renderRef.current();
+              return;
+            }
+            rafRef.current = requestAnimationFrame(tick);
+          }
+          rafRef.current = requestAnimationFrame(tick);
+        }
       }
       e.preventDefault();
     }
@@ -480,7 +590,7 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
 
     function onUp(_e: MouseEvent) {
       if (dragNode) {
-        if (!hasDragged) {
+        if (!hasDragged && !dragNode.isCenter && dragNode.slug !== currentSlug) {
           onSelectSlug(dragNode.slug);
         }
         // Release ALL nodes
@@ -526,20 +636,59 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
       canvas.removeEventListener("mouseup", onUp);
       canvas.removeEventListener("mouseleave", onLeave);
     };
-  }, [onSelectSlug]);
+  }, [onSelectSlug, currentSlug]);
 
-  // Resize observer
+  // Resize observer (debounced, with immediate canvas resize + redraw)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let timer = 0;
     const ro = new ResizeObserver((entries) => {
+      let nextWidth = widthRef.current;
       for (const entry of entries) {
-        widthRef.current = entry.contentRect.width;
+        nextWidth = entry.contentRect.width;
       }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (nextWidth === widthRef.current) return;
+        widthRef.current = nextWidth;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = nextWidth * dpr;
+          canvas.height = HEIGHT * dpr;
+          canvas.style.width = `${nextWidth}px`;
+          canvas.style.height = `${HEIGHT}px`;
+        }
+        renderRef.current();
+      }, 100);
     });
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
   }, []);
+
+  if (isLoading) {
+    return (
+      <div
+        className="w-full rounded-lg border border-zinc-100 bg-zinc-50/50 animate-pulse"
+        style={{ height: 280 }}
+      />
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="w-full rounded-lg border border-red-100 bg-red-50/50 flex flex-col items-center justify-center gap-2 py-6" style={{ height: HEIGHT }}>
+        <p className="text-[11px] text-red-400">关系图加载失败</p>
+        <button onClick={() => refetch()} className="text-[10px] px-3 py-1 rounded-full border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
+          重试
+        </button>
+      </div>
+    );
+  }
 
   if (!data || data.nodes.length === 0) {
     return (
@@ -551,7 +700,9 @@ export function LocalGraph({ pageId, currentSlug, onSelectSlug }: LocalGraphProp
     <div ref={containerRef} className="w-full">
       <canvas
         ref={canvasRef}
-        className="w-full rounded-lg border border-zinc-100 bg-zinc-50/50"
+        className={`w-full rounded-lg border border-zinc-100 bg-zinc-50/50 transition-opacity duration-150 ${
+          transitioning ? "opacity-50" : ""
+        }`}
         style={{ height: HEIGHT }}
       />
       <div className="flex gap-1 mt-1.5 justify-center">

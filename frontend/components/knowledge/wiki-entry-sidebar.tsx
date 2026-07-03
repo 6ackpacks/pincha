@@ -116,9 +116,9 @@ export function WikiEntrySidebar({ page, slug, onSelectSlug }: WikiEntrySidebarP
       )}
 
       {/* Relations */}
-      {page.relations.length > 0 && (
-        <div className="mb-6">
-          <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-3">此页链接到</h4>
+      <div className="mb-6">
+        <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wide mb-3">此页链接到</h4>
+        {page.relations.length > 0 ? (
           <div className="space-y-2">
             {page.relations.map((rel) => (
               <button
@@ -136,8 +136,10 @@ export function WikiEntrySidebar({ page, slug, onSelectSlug }: WikiEntrySidebarP
               </button>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-zinc-400 text-center py-2">暂无关联词条</p>
+        )}
+      </div>
 
       {/* Sources */}
       {page.sources.length > 0 && (

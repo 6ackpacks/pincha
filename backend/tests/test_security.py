@@ -270,6 +270,7 @@ class TestInputValidation:
             "/api/v1/videos",
             json={"url": long_url, "platform": "youtube"},
             cookies={"session": token},
+            headers={"Origin": "http://localhost:3000"},
         )
         # Pydantic HttpUrl validation or server-side length check
         assert resp.status_code == 422

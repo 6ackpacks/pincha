@@ -27,6 +27,7 @@ class VideoResponse(BaseModel):
     duration: str | None = None
     status: VideoProgress
     in_wiki: bool = False
+    in_library: bool = False
     show_name: str | None = None
     host: str | None = None
     description: str | None = None

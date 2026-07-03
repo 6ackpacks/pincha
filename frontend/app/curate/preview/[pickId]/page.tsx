@@ -2,21 +2,22 @@
 
 import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
 import { ProseMirrorRenderer } from "@/components/curate/prosemirror-renderer";
+import { ReadableArticleContent } from "@/components/curate/readable-article-content";
 import { Sidebar } from "@/components/layout/sidebar";
 import {
   getPickDetail,
   getProductDetail,
   getProductReviews,
-  triggerDeepAnalyze,
   type PickDetail,
   type ProductDetail,
   type ProductReview,
 } from "@/lib/api";
+import { useCurateDeepAnalyze, useSyncCurateArticleQueue } from "@/hooks/use-curate-deep-analyze";
+import { getCurateImportUiState } from "@/lib/curate-article";
 import { cn, stripMarkdown } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -128,7 +129,7 @@ function PreviewHeader({ pick }: { pick: PickDetail }) {
       {pick.author_name && (
         <div className="flex items-center gap-2 mb-4">
           {pick.author_avatar ? (
-            <img src={pick.author_avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
+            <img src={pick.author_avatar} alt="" loading="lazy" decoding="async" className="w-6 h-6 rounded-full object-cover" />
           ) : (
             <div className="w-6 h-6 rounded-full bg-zinc-200" />
           )}
@@ -172,20 +173,6 @@ function PreviewBody({ pick }: { pick: PickDetail }) {
     );
   }
 
-  // Try to parse raw_content as ProseMirror JSON
-  let proseMirrorDoc: Record<string, unknown> | null = null;
-  if (pick.raw_content) {
-    try {
-      const parsed = JSON.parse(pick.raw_content);
-      if (parsed && typeof parsed === "object" && parsed.type === "doc" && Array.isArray(parsed.content)) {
-        proseMirrorDoc = parsed;
-      }
-    } catch {
-      // Not JSON, will render as markdown
-    }
-  }
-
-  // Render with ProseMirror renderer if JSON, otherwise fallback to react-markdown
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -193,87 +180,7 @@ function PreviewBody({ pick }: { pick: PickDetail }) {
       transition={{ delay: 0.1 }}
       className="border border-zinc-100 rounded-xl p-6 mb-6"
     >
-      {proseMirrorDoc ? (
-        <ProseMirrorRenderer content={proseMirrorDoc as any} />
-      ) : (
-        <article className="prose prose-sm prose-zinc max-w-none">
-          <ReactMarkdown
-            components={{
-              h1: ({ children }) => (
-                <h2 className="text-base font-bold text-zinc-800 mt-4 mb-2">{children}</h2>
-              ),
-              h2: ({ children }) => (
-                <h3 className="text-sm font-bold text-zinc-700 mt-3 mb-1.5">{children}</h3>
-              ),
-              h3: ({ children }) => (
-                <h4 className="text-sm font-semibold text-zinc-700 mt-2 mb-1">{children}</h4>
-              ),
-              p: ({ children }) => (
-                <p className="text-sm text-zinc-600 leading-relaxed mb-3">{children}</p>
-              ),
-              a: ({ href, children }) => (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-emerald-500 hover:text-emerald-600 underline break-all"
-                >
-                  {children}
-                </a>
-              ),
-              ul: ({ children }) => (
-                <ul className="list-disc pl-4 space-y-1 mb-3">{children}</ul>
-              ),
-              ol: ({ children }) => (
-                <ol className="list-decimal pl-4 space-y-1 mb-3">{children}</ol>
-              ),
-              li: ({ children }) => (
-                <li className="text-sm text-zinc-600 leading-relaxed">{children}</li>
-              ),
-              strong: ({ children }) => (
-                <strong className="font-semibold text-zinc-800">{children}</strong>
-              ),
-              em: ({ children }) => (
-                <em className="italic text-zinc-600">{children}</em>
-              ),
-              code: ({ children, className }) => {
-                const isBlock = className?.includes("language-");
-                if (isBlock) {
-                  return (
-                    <code className="block bg-zinc-50 border border-zinc-100 rounded-lg p-3 text-xs text-zinc-700 overflow-x-auto my-3 font-mono">
-                      {children}
-                    </code>
-                  );
-                }
-                return (
-                  <code className="bg-zinc-100 text-zinc-700 px-1 py-0.5 rounded text-xs font-mono">
-                    {children}
-                  </code>
-                );
-              },
-              pre: ({ children }) => (
-                <pre className="bg-zinc-50 border border-zinc-100 rounded-lg p-3 overflow-x-auto my-3">
-                  {children}
-                </pre>
-              ),
-              blockquote: ({ children }) => (
-                <blockquote className="border-l-2 border-zinc-200 pl-3 my-3 text-zinc-500 italic">
-                  {children}
-                </blockquote>
-              ),
-              img: ({ src, alt }) => (
-                <img
-                  src={src}
-                  alt={alt || ""}
-                  className="rounded-lg max-w-full h-auto my-3 border border-zinc-100"
-                />
-              ),
-            }}
-          >
-            {pick.raw_content}
-          </ReactMarkdown>
-        </article>
-      )}
+      <ReadableArticleContent content={pick.raw_content} />
     </motion.div>
   );
 }
@@ -347,6 +254,8 @@ function ProductCard({ pick }: { pick: PickDetail }) {
           <img
             src={product?.avatar_url || pick.author_avatar || ""}
             alt={product?.name || pick.title}
+            loading="lazy"
+            decoding="async"
             className="w-16 h-16 rounded-2xl object-cover border border-zinc-100 shadow-sm shrink-0"
           />
         )}
@@ -396,6 +305,8 @@ function ProductCard({ pick }: { pick: PickDetail }) {
                 key={idx}
                 src={url}
                 alt={`${product?.name || pick.title} screenshot ${idx + 1}`}
+                loading="lazy"
+                decoding="async"
                 className="h-[200px] w-auto rounded-xl border border-zinc-100 object-cover shrink-0"
               />
             ))}
@@ -445,6 +356,8 @@ function ProductCard({ pick }: { pick: PickDetail }) {
                   <img
                     src={review.user_avatar}
                     alt=""
+                    loading="lazy"
+                    decoding="async"
                     className="w-7 h-7 rounded-full object-cover shrink-0"
                   />
                 ) : (
@@ -492,23 +405,20 @@ function ProductCard({ pick }: { pick: PickDetail }) {
 }
 
 function PreviewActions({ pick }: { pick: PickDetail }) {
-  const [importState, setImportState] = useState<"idle" | "loading" | "success" | "error">(
-    pick.article_id ? "success" : "idle"
-  );
+  const isProduct = pick.source_type === "product";
+  useSyncCurateArticleQueue(pick);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const importState = isSubmitting ? "loading" : getCurateImportUiState(pick);
+  const importMut = useCurateDeepAnalyze([["pick-detail", pick.id]]);
 
-  const importMut = useMutation({
-    mutationFn: () => triggerDeepAnalyze(pick.id),
-    onSuccess: () => setImportState("success"),
-    onError: () => {
-      setImportState("error");
-      setTimeout(() => setImportState("idle"), 3000);
-    },
-  });
-
-  const handleImport = () => {
+  const handleImport = async () => {
     if (importState === "loading" || importState === "success") return;
-    setImportState("loading");
-    importMut.mutate();
+    setIsSubmitting(true);
+    try {
+      await importMut.mutateAsync(pick);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -529,37 +439,39 @@ function PreviewActions({ pick }: { pick: PickDetail }) {
         查看原文
       </a>
 
-      {/* Import to knowledge base */}
-      <button
-        onClick={handleImport}
-        disabled={importState === "loading" || importState === "success"}
-        className={cn(
-          "flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors",
-          importState === "success"
-            ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
-            : importState === "error"
-              ? "bg-red-50 text-red-600 border border-red-200"
-              : "bg-emerald-600 text-white hover:bg-emerald-700"
-        )}
-      >
-        {importState === "loading" ? (
-          <><CircleNotch size={15} className="animate-spin" />收录中...</>
-        ) : importState === "success" ? (
-          <><CheckCircle size={15} weight="bold" />已收进知识库</>
-        ) : importState === "error" ? (
-          <><WarningCircle size={15} weight="bold" />收录失败</>
-        ) : (
-          <><Sparkle size={15} weight="bold" />收进知识库</>
-        )}
-      </button>
+      {/* Import to knowledge base — products are not collected into the knowledge base */}
+      {!isProduct && (
+        <button
+          onClick={handleImport}
+          disabled={importState === "loading" || importState === "success"}
+          className={cn(
+            "flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition-colors",
+            importState === "success"
+              ? "bg-zinc-100 text-zinc-400 border border-zinc-200 cursor-not-allowed"
+              : importState === "error"
+                ? "bg-red-50 text-red-600 border border-red-200"
+                : "bg-emerald-600 text-white hover:bg-emerald-700"
+          )}
+        >
+          {importState === "loading" ? (
+            <><CircleNotch size={15} className="animate-spin" />收录中...</>
+          ) : importState === "success" ? (
+            <><CheckCircle size={15} weight="bold" />已收进知识库</>
+          ) : importState === "error" ? (
+            <><WarningCircle size={15} weight="bold" />重试收录</>
+          ) : (
+            <><Sparkle size={15} weight="bold" />收进知识库</>
+          )}
+        </button>
+      )}
 
       {/* If already imported, show link to article */}
-      {pick.article_id && (
+      {!isProduct && pick.article_id && (
         <Link
           href={`/articles/${pick.article_id}`}
           className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium text-emerald-600 hover:bg-emerald-50 transition-colors"
         >
-          查看整理结果 →
+          {importState === "success" ? "查看整理结果 →" : "查看整理进度 →"}
         </Link>
       )}
     </motion.div>

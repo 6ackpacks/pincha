@@ -114,7 +114,7 @@ cp .env.example .env
 
 ```bash
 # AI 功能（必填）— 一个 Key 驱动全部 AI 能力
-OPENAI_API_KEY=sk-你的-tokendance-key
+OPENAI_API_KEY=你的-tokendance-key
 SUMMARY_API_BASE=https://tokendance.space/gateway/v1
 
 # 字幕获取（推荐）— 国内服务器免翻墙获取 YouTube 字幕
@@ -147,7 +147,7 @@ docker-compose up -d
 
 | 变量 | 必需 | 说明 | 示例 |
 |------|:----:|------|------|
-| `OPENAI_API_KEY` | ✅ | TokenDance API Key | `sk-xxxxxxxx` |
+| `OPENAI_API_KEY` | ✅ | TokenDance API Key | `your-api-key` |
 | `SUMMARY_API_BASE` | ✅ | AI 网关地址 | `https://tokendance.space/gateway/v1` |
 | `TIKHUB_API_KEY` | 推荐 | TikHub 字幕服务 Key | `your-key` |
 | `JWT_SECRET_KEY` | ✅ | JWT 签名密钥（≥32 字符） | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |

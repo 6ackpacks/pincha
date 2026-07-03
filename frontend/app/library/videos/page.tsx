@@ -4,9 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 import { getVideos, deleteVideo, proxyThumbnail, type VideoResponse } from "@/lib/api";
 import { cn, stripMarkdown } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Play,
   CheckCircle,
@@ -16,6 +25,7 @@ import {
   Trash,
   ArrowLeft,
 } from "@phosphor-icons/react";
+import { useState } from "react";
 
 const spring = { type: "spring" as const, stiffness: 300, damping: 24 };
 
@@ -74,7 +84,7 @@ function VideoGrid({
             >
               <div className="h-36 bg-zinc-100 relative overflow-hidden">
                 {thumbSrc ? (
-                  <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
+                  <img src={thumbSrc} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-emerald-50 to-teal-100">
                     <Play size={20} weight="bold" className="text-emerald-400" />
@@ -133,12 +143,22 @@ export default function LibraryVideosPage() {
 
   const deleteMut = useMutation({
     mutationFn: deleteVideo,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["videos"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
+      toast.success("已删除该解析");
+    },
+    onError: () => {
+      toast.error("删除失败，请稍后重试");
+    },
   });
 
   const sortedVideos = [...videos].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const pendingDeleteVideo = sortedVideos.find((v) => v.id === pendingDeleteId) ?? null;
+  const pendingDeleteIsPodcast = pendingDeleteVideo?.platform === "podcast";
 
   return (
     <div className="flex h-screen bg-[#FAFAFA]">
@@ -167,8 +187,50 @@ export default function LibraryVideosPage() {
               ))}
             </div>
           ) : (
-            <VideoGrid videos={sortedVideos} onDelete={(id) => deleteMut.mutate(id)} />
+            <VideoGrid videos={sortedVideos} onDelete={(id) => setPendingDeleteId(id)} />
           )}
+
+          {/* 删除确认弹窗 */}
+          <Dialog
+            open={!!pendingDeleteId}
+            onOpenChange={(open) => { if (!open) setPendingDeleteId(null); }}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{pendingDeleteIsPodcast ? "删除播客" : "删除解析"}</DialogTitle>
+                <DialogDescription>
+                  确定要删除这条{pendingDeleteIsPodcast ? "播客" : "视频"}解析吗？删除后数据不可恢复。
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <button
+                  onClick={() => setPendingDeleteId(null)}
+                  disabled={deleteMut.isPending}
+                  className="px-4 py-2 text-sm font-medium text-zinc-500 hover:text-zinc-700 transition-colors disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    if (pendingDeleteId) {
+                      deleteMut.mutate(pendingDeleteId, {
+                        onSettled: () => setPendingDeleteId(null),
+                      });
+                    }
+                  }}
+                  disabled={deleteMut.isPending}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                >
+                  {deleteMut.isPending ? (
+                    <CircleNotch size={14} className="animate-spin" />
+                  ) : (
+                    <Trash size={14} weight="bold" />
+                  )}
+                  确认删除
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </main>
     </div>

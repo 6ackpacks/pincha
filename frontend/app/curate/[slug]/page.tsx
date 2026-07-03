@@ -10,10 +10,10 @@ import {
   getCurateV2ChannelPicks,
   subscribeCurateV2Channel,
   unsubscribeCurateV2Channel,
-  triggerDeepAnalyze,
   getMe,
 } from "@/lib/api";
 import { PickCard } from "@/components/curate/pick-card";
+import { useCurateDeepAnalyze } from "@/hooks/use-curate-deep-analyze";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -99,6 +99,7 @@ export default function ChannelDetailPage() {
     }) => subscribeCurateV2Channel(channel!.id, emailEnabled, emailAddress),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setShowSubscribeDialog(false);
       setEmailEnabled(false);
       setEmailAddress("");
@@ -109,13 +110,12 @@ export default function ChannelDetailPage() {
     mutationFn: () => unsubscribeCurateV2Channel(channel!.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["curate-v2-channels"] });
+      queryClient.invalidateQueries({ queryKey: ["curate-v2-feed"] });
       setShowUnsubscribeDialog(false);
     },
   });
 
-  const deepAnalyzeMut = useMutation({
-    mutationFn: triggerDeepAnalyze,
-  });
+  const deepAnalyzeMut = useCurateDeepAnalyze([["curate-v2-picks", slug, selectedDate]]);
 
   const recentDates = getRecentDates(14);
 
@@ -226,7 +226,7 @@ export default function ChannelDetailPage() {
                   key={pick.id}
                   pick={pick}
                   index={i}
-                  onDeepAnalyze={(pickId) => deepAnalyzeMut.mutateAsync(pickId)}
+                  onDeepAnalyze={(targetPick) => deepAnalyzeMut.mutateAsync(targetPick)}
                 />
               ))}
             </div>

@@ -3,7 +3,11 @@ import { request } from "./client";
 export interface NotificationItem {
   id: number;
   user_id: string;
-  pick_id: number;
+  pick_id: number | null;
+  notif_type?: string;
+  title?: string | null;
+  body?: string | null;
+  action_url?: string | null;
   is_read: boolean;
   created_at: string;
   pick: {

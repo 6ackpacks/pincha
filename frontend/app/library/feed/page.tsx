@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sidebar } from "@/components/layout/sidebar";
 import {
   getCurateV2Feed,
-  triggerDeepAnalyze,
   type CurateV2ChannelPicks,
+  type CurateV2Pick,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useCurateDeepAnalyze } from "@/hooks/use-curate-deep-analyze";
 import {
   ArrowLeft,
   CaretDown,
@@ -43,7 +44,7 @@ function ChannelSection({
   onDeepAnalyze,
 }: {
   channelData: CurateV2ChannelPicks;
-  onDeepAnalyze: (pickId: number) => Promise<unknown>;
+  onDeepAnalyze: (pick: CurateV2Pick) => Promise<unknown>;
 }) {
   const [expanded, setExpanded] = useState(true);
   const picks = channelData.picks;
@@ -92,7 +93,7 @@ function ChannelSection({
                     channel_name: channelData.channel.name,
                   }}
                   index={i}
-                  onDeepAnalyze={(pickId) => onDeepAnalyze(pickId)}
+                  onDeepAnalyze={(targetPick) => onDeepAnalyze(targetPick)}
                 />
               ))}
             </div>
@@ -112,9 +113,7 @@ export default function FeedPage() {
     queryFn: () => getCurateV2Feed(selectedDate),
   });
 
-  const deepAnalyzeMut = useMutation({
-    mutationFn: triggerDeepAnalyze,
-  });
+  const deepAnalyzeMut = useCurateDeepAnalyze([["curate-v2-feed", selectedDate]]);
 
   const feedChannels = feedData?.channels ?? [];
   const hasContent = feedChannels.some((ch) => ch.picks.length > 0);
@@ -193,8 +192,8 @@ export default function FeedPage() {
                   <ChannelSection
                     key={channelData.channel.id}
                     channelData={channelData}
-                    onDeepAnalyze={(pickId) =>
-                      deepAnalyzeMut.mutateAsync(pickId)
+                    onDeepAnalyze={(pick) =>
+                      deepAnalyzeMut.mutateAsync(pick)
                     }
                   />
                 ))}

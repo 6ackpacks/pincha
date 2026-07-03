@@ -3,11 +3,24 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Provider as JotaiProvider } from "jotai";
 import { ThemeProvider } from "next-themes";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { getQueryClient } from "@/lib/query-client";
+import { makeQueryClient } from "@/lib/query-client";
+import { useSessionRefresh } from "@/hooks/use-session-refresh";
+
+function SessionRefreshGuard({ children }: { children: React.ReactNode }) {
+  useSessionRefresh();
+  return <>{children}</>;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => getQueryClient());
+  const pathname = usePathname();
+  const [queryClient] = useState(() => makeQueryClient());
+  const isLanding = pathname === "/landing";
+
+  if (isLanding) {
+    return <>{children}</>;
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -18,7 +31,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <SessionRefreshGuard>{children}</SessionRefreshGuard>
         </ThemeProvider>
       </JotaiProvider>
     </QueryClientProvider>
