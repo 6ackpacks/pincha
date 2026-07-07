@@ -258,7 +258,7 @@ export function LandingHeroSection({ heroRef }: LandingHeroSectionProps) {
           </p>
         </div>
         <div className="mt-8 flex animate-[landingHeroIn_580ms_ease-out_320ms_both] flex-col items-center gap-3 sm:flex-row sm:gap-4">
-          <MagneticBtn href="/login" className="px-6 py-3 text-[14px] font-semibold bg-[#166534] text-white rounded-full hover:bg-[#14532d] hover:shadow-[0_18px_40px_-24px_rgba(5,150,105,0.75)] gap-2 transition-all duration-200">
+          <MagneticBtn href="/videos" className="px-6 py-3 text-[14px] font-semibold bg-[#166534] text-white rounded-full hover:bg-[#14532d] hover:shadow-[0_18px_40px_-24px_rgba(5,150,105,0.75)] gap-2 transition-all duration-200">
             开始品读 <ArrowRight size={14} weight="bold" />
           </MagneticBtn>
           <MagneticBtn href="#features" className="px-6 py-3 text-[14px] font-semibold bg-white/78 text-[#0f1f17] border border-emerald-950/10 rounded-full hover:border-[#166534]/25 hover:bg-white gap-2 transition-all duration-200">

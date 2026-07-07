@@ -1,73 +1,23 @@
-"""Admin API — category/source management (ADMIN_TOKEN auth) + video management."""
+"""Admin API — category/source management + video management."""
 
 import asyncio
 import logging
-import os
-import secrets
 import uuid as uuid_mod
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-from app.core.auth import get_current_user, require_admin_user
+from app.core.auth import require_admin_user
 from app.core.database import get_session
 from app.core.utils import escape_like
-from app.models.user import User
 from app.models.video import Video
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-# ---------------------------------------------------------------------------
-# Auth dependency
-# ---------------------------------------------------------------------------
-
-
-async def require_admin_token_or_user(
-    request: Request,
-    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
-):
-    """Dual-mode admin auth: X-Admin-Token header OR JWT-based admin user.
-
-    If X-Admin-Token is provided and valid, allow access (with IP logging).
-    Otherwise, fall back to require_admin_user (JWT + is_admin check).
-    """
-    admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
-
-    # Path 1: Static admin token provided
-    if x_admin_token:
-        if not admin_token:
-            raise HTTPException(status_code=503, detail="Admin token is not configured")
-        if secrets.compare_digest(x_admin_token, admin_token):
-            client_ip = request.client.host if request.client else "unknown"
-            logger.info("Admin token auth from %s for %s", client_ip, request.url.path)
-            return
-        # Token provided but invalid — do not fall through, reject immediately
-        raise HTTPException(status_code=403, detail="Invalid admin token")
-
-    # Path 2: No admin token header — require JWT admin user
-    from app.core.database import async_session
-
-    async with async_session() as db:
-        from app.core.auth import get_current_user as _get_user
-        user = await _get_user(session=request.cookies.get("session"), db=db)
-        if not user or not user.is_admin:
-            raise HTTPException(status_code=403, detail="需要管理员权限")
-
-
-def require_admin_token(x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")):
-    """Legacy: static token only (kept for reference, prefer require_admin_token_or_user)."""
-    admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
-    if not admin_token:
-        raise HTTPException(status_code=503, detail="Admin token is not configured")
-    if not secrets.compare_digest(x_admin_token or "", admin_token):
-        raise HTTPException(status_code=403, detail="Invalid admin token")
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +31,7 @@ def require_admin_token(x_admin_token: Optional[str] = Header(None, alias="X-Adm
 
 
 
-@router.post("/curate-v2/trigger", dependencies=[Depends(require_admin_token_or_user)])
+@router.post("/curate-v2/trigger", dependencies=[Depends(require_admin_user)])
 async def admin_trigger_curate_v2(
     target_date: Optional[str] = Query(default=None, description="YYYY-MM-DD, defaults to today Beijing time"),
 ):
@@ -168,7 +118,7 @@ async def admin_delete_video(video_id: str, db: AsyncSession = Depends(get_sessi
 
 
 # ---------------------------------------------------------------------------
-# New admin endpoints (JWT-based require_admin_user)
+# Admin endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -255,7 +205,7 @@ async def admin_monitor_system():
     }
 
 
-# --- Video management (enhanced, JWT auth) ---
+# --- Video management (enhanced) ---
 
 
 class VideoUpdateBody(BaseModel):
@@ -306,68 +256,6 @@ async def admin_batch_videos(body: BatchActionBody, db: AsyncSession = Depends(g
 
     await db.commit()
     return {"results": results}
-
-
-# --- User management ---
-
-
-@router.get("/users", dependencies=[Depends(require_admin_user)])
-async def admin_list_users(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, le=100),
-    search: Optional[str] = Query(default=None),
-    db: AsyncSession = Depends(get_session),
-):
-    query = select(User)
-    if search:
-        pattern = f"%{escape_like(search)}%"
-        query = query.where(
-            User.nickname.ilike(pattern) | User.email.ilike(pattern) | User.phone.ilike(pattern)
-        )
-    query = query.order_by(User.created_at.desc())
-
-    count_query = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-
-    offset = (page - 1) * page_size
-    result = await db.execute(query.offset(offset).limit(page_size))
-    users = result.scalars().all()
-
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "items": [
-            {
-                "id": str(u.id),
-                "watcha_user_id": u.watcha_user_id,
-                "nickname": u.nickname,
-                "email": u.email,
-                "phone": u.phone,
-                "is_admin": u.is_admin,
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-            for u in users
-        ],
-    }
-
-
-class UserUpdateBody(BaseModel):
-    is_admin: Optional[bool] = None
-
-
-@router.patch("/users/{user_id}", dependencies=[Depends(require_admin_user)])
-async def admin_update_user(
-    user_id: str, body: UserUpdateBody, db: AsyncSession = Depends(get_session)
-):
-    user = await db.get(User, uuid_mod.UUID(user_id))
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    for field, value in body.model_dump(exclude_none=True).items():
-        setattr(user, field, value)
-    await db.commit()
-    return {"id": user_id, "updated": True}
 
 
 # --- Trending management ---

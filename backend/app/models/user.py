@@ -1,10 +1,11 @@
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func
+from datetime import datetime
+
+from sqlalchemy import Boolean, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func as sql_func
-from datetime import datetime
 
 from app.models.base import Base
 
@@ -18,16 +19,15 @@ class User(Base):
         default=uuid.uuid4,
         server_default=func.gen_random_uuid(),
     )
-    # OAuth identity
-    watcha_user_id: Mapped[int | None] = mapped_column(
-        BigInteger,
+    local_identity: Mapped[str | None] = mapped_column(
+        String(64),
         unique=True,
         nullable=True,
         index=True,
     )
     nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # email is optional — Watcha users may not have one
+    # email is optional in local single-user deployments.
     email: Mapped[str | None] = mapped_column(
         String(255),
         unique=True,
@@ -37,15 +37,6 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
-    )
-    # OAuth tokens (for future API calls / refresh)
-    # SECURITY WARNING: OAuth tokens currently stored in plaintext
-    # TODO: Implement encryption using Fernet or AES-256-GCM before production deployment
-    # Encryption key should be managed via environment variable OAUTH_ENCRYPTION_KEY
-    watcha_access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
-    watcha_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
-    watcha_token_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         server_default=sql_func.now(),

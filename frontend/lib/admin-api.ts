@@ -2,7 +2,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function adminRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
     headers: { "Content-Type": "application/json", ...options?.headers as Record<string, string> },
     ...options,
   });
@@ -88,22 +87,6 @@ export interface Source {
   url: string;
   enabled: boolean;
   created_at: string;
-}
-
-export interface AdminUser {
-  id: string;
-  nickname: string | null;
-  avatar_url: string | null;
-  email: string | null;
-  is_admin: boolean;
-  created_at: string;
-}
-
-export interface PaginatedUsers {
-  items: AdminUser[];
-  total: number;
-  page: number;
-  page_size: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,23 +188,6 @@ export function deleteSource(id: string) {
 
 export function triggerCurate() {
   return adminRequest<void>("/api/v1/admin/curate-v2/trigger", { method: "POST" });
-}
-
-// ---------------------------------------------------------------------------
-// Users
-// ---------------------------------------------------------------------------
-
-export function fetchUsers(params: { page: number; search?: string }) {
-  const sp = new URLSearchParams({ page: String(params.page) });
-  if (params.search) sp.set("search", params.search);
-  return adminRequest<PaginatedUsers>(`/api/v1/admin/users?${sp}`);
-}
-
-export function updateUser(id: string, data: { is_admin: boolean }) {
-  return adminRequest<void>(`/api/v1/admin/users/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
 }
 
 // ---------------------------------------------------------------------------

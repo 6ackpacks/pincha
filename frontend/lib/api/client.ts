@@ -161,18 +161,9 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
   const mergedHeaders = { ...headers, ...(options?.headers as Record<string, string>) };
 
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
     ...options,
     headers: mergedHeaders,
   });
-
-  if (res.status === 401) {
-    // Session expired or revoked — redirect to login
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new Error("未登录");
-  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

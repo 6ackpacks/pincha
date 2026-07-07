@@ -58,7 +58,7 @@ frontend/
 │   ├── curate/       # 内容策展
 │   ├── library/      # 知识库
 │   ├── trending/     # 热门内容
-│   └── login/        # 登录
+│   └── admin/        # 本地管理界面
 ├── components/       # React 组件（按功能模块分目录）
 ├── atoms/            # Jotai 状态原子
 ├── hooks/            # 自定义 React Hooks

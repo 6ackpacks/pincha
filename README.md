@@ -25,7 +25,7 @@
 
 Pincha is an AI content workspace for people who learn from long-form media. Instead of keeping scattered links, you can save a video, podcast, article, or curated signal, then let Pincha turn it into structured knowledge you can read, search, connect, and ask about later.
 
-The open-source edition is designed for single-user local deployment. It has no login, registration, external identity callback, or multi-user account system. When the backend starts, it creates one stable Local Owner and stores all content under that local owner.
+The open-source edition is designed for single-user local deployment. It has no login, registration, external identity callback, or multi-user account system. On first use, the backend creates one stable Local Owner and stores all content under that local owner.
 
 ## Features
 

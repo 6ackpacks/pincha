@@ -1,11 +1,7 @@
 import { test as base, type Page, type BrowserContext } from '@playwright/test'
 
 /**
- * Auth fixture that injects a mock session cookie into the browser context.
- *
- * The backend uses cookie-based JWT auth (HttpOnly cookie set after OAuth login
- * via /api/v1/auth/login). In E2E tests we bypass the OAuth flow by injecting
- * the session cookie directly.
+ * Local-owner fixture for single-user community mode.
  *
  * Usage:
  *   import { test } from './fixtures/auth.fixture'
@@ -18,13 +14,9 @@ export const MOCK_USER = {
   nickname: '测试用户',
   avatar_url: null,
   email: 'test@example.com',
+  phone: null,
+  is_admin: true,
 }
-
-// The session cookie name used by the backend
-const SESSION_COOKIE_NAME = 'session'
-
-// A fake session token for testing (the backend won't validate it when mocked).
-const MOCK_SESSION_TOKEN = 'mock-session-token-for-e2e'
 
 type AuthFixtures = {
   authedPage: Page
@@ -34,20 +26,6 @@ type AuthFixtures = {
 export const test = base.extend<AuthFixtures>({
   authedContext: async ({ browser }, use) => {
     const context = await browser.newContext()
-
-    // Inject session cookie
-    await context.addCookies([
-      {
-        name: SESSION_COOKIE_NAME,
-        value: MOCK_SESSION_TOKEN,
-        domain: 'localhost',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-      },
-    ])
-
     await use(context)
     await context.close()
   },

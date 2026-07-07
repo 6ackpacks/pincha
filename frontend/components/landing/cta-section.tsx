@@ -14,8 +14,8 @@ export function CtaSection() {
         >
           开始品读。
         </h2>
-        <MagneticBtn href="/login" className="px-8 py-3.5 text-[14px] font-medium bg-emerald-600 text-white rounded-full hover:bg-emerald-700 hover:shadow-[0_18px_40px_-24px_rgba(5,150,105,0.75)] gap-2 transition-all duration-200">
-          免费开始 <ArrowRight size={14} weight="bold" />
+        <MagneticBtn href="/videos" className="px-8 py-3.5 text-[14px] font-medium bg-emerald-600 text-white rounded-full hover:bg-emerald-700 hover:shadow-[0_18px_40px_-24px_rgba(5,150,105,0.75)] gap-2 transition-all duration-200">
+          进入工作台 <ArrowRight size={14} weight="bold" />
         </MagneticBtn>
       </RevealSection>
     </section>

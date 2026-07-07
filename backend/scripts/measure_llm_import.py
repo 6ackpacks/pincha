@@ -55,7 +55,6 @@ def main() -> None:
     os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://x:x@localhost/x")
     os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
     os.environ.setdefault("SECRET_KEY", "test-secret")
-    os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret")
 
     # 3. import llm_client
     before = _rss_mb()

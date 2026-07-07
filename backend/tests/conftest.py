@@ -164,7 +164,7 @@ def test_user():
     user.name = "Test User"
     user.is_active = True
     user.is_admin = False
-    user.watcha_user_id = "test_watcha_id"
+    user.local_identity = "local-owner"
     return user
 
 
@@ -224,30 +224,22 @@ async def client(test_user, mock_redis) -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 async def raw_client(mock_redis) -> AsyncGenerator[AsyncClient, None]:
-    """Client WITHOUT auth override — tests real JWT validation."""
+    """Client without auth override, using the real Local Owner dependency."""
     from app.core.database import get_session
-    from app.core.redis import get_redis
-    from app.core.auth import _USER_CACHE
+    from app.core.auth import _USER_ID_CACHE
     from app.main import app
-    from unittest.mock import patch, AsyncMock as _AsyncMock
 
-    _USER_CACHE.clear()
+    _USER_ID_CACHE.clear()
 
     async def override_get_session():
         async with TestSessionLocal() as session:
             yield session
 
-    async def override_get_redis():
-        return mock_redis
-
     app.dependency_overrides[get_session] = override_get_session
-    app.dependency_overrides[get_redis] = override_get_redis
 
-    mock_get_redis = _AsyncMock(return_value=mock_redis)
-    with patch("app.core.auth.get_redis", mock_get_redis):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
     app.dependency_overrides.clear()
-    _USER_CACHE.clear()
+    _USER_ID_CACHE.clear()

@@ -2,7 +2,6 @@
 
 测试后端调用外部 HTTP API 时的容错行为：
 - article_service.extract_article 的网络错误处理
-- OAuth (Watcha) 不可达时的行为
 - 通用 HTTP 超时 / 5xx / 无效 JSON 处理
 """
 
@@ -166,103 +165,6 @@ class TestExternalAPIResilience:
 
         result = _request_with_retry(mock_client, "/test", {"q": "hello"})
         assert result is None
-
-
-class TestOAuthProviderResilience:
-    """OAuth (Watcha) 服务不可达时的行为测试."""
-
-    @pytest.mark.asyncio
-    async def test_oauth_token_exchange_timeout(self, client, mock_redis):
-        """OAuth token exchange 超时 → 重定向到错误页面."""
-        # Setup: store a valid state in mock_redis
-        mock_redis.get = AsyncMock(return_value=b"1")
-        mock_redis.delete = AsyncMock(return_value=1)
-
-        async def _fake_get_redis():
-            return mock_redis
-
-        with patch("app.api.v1.auth.get_redis", new=_fake_get_redis):
-            with patch("app.api.v1.auth.httpx.AsyncClient") as mock_client_cls:
-                mock_instance = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(
-                    return_value=mock_instance
-                )
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                mock_instance.post.side_effect = httpx.TimeoutException(
-                    "Connection timed out"
-                )
-
-                resp = await client.get(
-                    "/api/v1/auth/callback",
-                    params={"code": "test_code", "state": "test_state"},
-                    follow_redirects=False,
-                )
-
-        # Should redirect to login error page
-        assert resp.status_code == 302
-        assert "error=" in resp.headers.get("location", "")
-
-    @pytest.mark.asyncio
-    async def test_oauth_userinfo_5xx(self, client, mock_redis):
-        """OAuth userinfo 返回 5xx → 重定向到错误页面."""
-        mock_redis.get = AsyncMock(return_value=b"1")
-        mock_redis.delete = AsyncMock(return_value=1)
-
-        async def _fake_get_redis():
-            return mock_redis
-
-        with patch("app.api.v1.auth.get_redis", new=_fake_get_redis):
-            with patch("app.api.v1.auth.httpx.AsyncClient") as mock_client_cls:
-                mock_instance = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(
-                    return_value=mock_instance
-                )
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-
-                # Token exchange succeeds
-                token_resp = MagicMock()
-                token_resp.status_code = 200
-                token_resp.json.return_value = {
-                    "access_token": "watcha_token",
-                    "refresh_token": "watcha_refresh",
-                    "expires_in": 1800,
-                }
-                mock_instance.post.return_value = token_resp
-
-                # Userinfo fails with 500
-                userinfo_resp = MagicMock()
-                userinfo_resp.status_code = 500
-                userinfo_resp.text = "Internal Server Error"
-                mock_instance.get.return_value = userinfo_resp
-
-                resp = await client.get(
-                    "/api/v1/auth/callback",
-                    params={"code": "test_code", "state": "test_state"},
-                    follow_redirects=False,
-                )
-
-        assert resp.status_code == 302
-        assert "error=" in resp.headers.get("location", "")
-
-    @pytest.mark.asyncio
-    async def test_oauth_invalid_state(self, client, mock_redis):
-        """OAuth state 校验失败 → 重定向到错误页面."""
-        # State not found in Redis
-        mock_redis.get = AsyncMock(return_value=None)
-
-        async def _fake_get_redis():
-            return mock_redis
-
-        with patch("app.api.v1.auth.get_redis", new=_fake_get_redis):
-            resp = await client.get(
-                "/api/v1/auth/callback",
-                params={"code": "test_code", "state": "invalid_state"},
-                follow_redirects=False,
-            )
-
-        assert resp.status_code == 302
-        location = resp.headers.get("location", "")
-        assert "error=" in location
 
 
 class TestTranscriptHQResilience:

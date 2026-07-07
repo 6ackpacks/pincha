@@ -143,7 +143,6 @@ export function regenerateSummaryStream(videoId: string, level: SummaryLevel, op
   };
   return fetch(`${API_BASE}/api/v1/videos/${videoId}/summary/${level}/regenerate/stream`, {
     method: "POST",
-    credentials: "include",
     headers,
     signal: options?.signal,
   }).then((res) => {
@@ -234,13 +233,13 @@ export function reprocessVideo(id: string) {
 
 // RAG / Knowledge Base (single-video chat)
 export async function getIngestStatus(videoId: string): Promise<{ ingested: boolean; chunks_count: number }> {
-  const res = await fetch(`${API_BASE}/api/v1/videos/${videoId}/ingest/status`, { credentials: "include" });
+  const res = await fetch(`${API_BASE}/api/v1/videos/${videoId}/ingest/status`);
   if (!res.ok) throw new Error("Failed to get ingest status");
   return res.json();
 }
 
 export async function ingestVideo(videoId: string): Promise<{ chunks_count: number; message: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/videos/${videoId}/ingest`, { method: "POST", credentials: "include" });
+  const res = await fetch(`${API_BASE}/api/v1/videos/${videoId}/ingest`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to ingest video");
   return res.json();
 }
@@ -248,7 +247,6 @@ export async function ingestVideo(videoId: string): Promise<{ chunks_count: numb
 export function streamChat(videoId: string, question: string): Promise<ReadableStream<Uint8Array>> {
   return fetch(`${API_BASE}/api/v1/videos/${videoId}/chat`, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
   }).then((res) => {
@@ -260,7 +258,6 @@ export function streamChat(videoId: string, question: string): Promise<ReadableS
 export function streamVideoAsk(videoId: string, question: string, options?: { signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>> {
   return fetch(`${API_BASE}/api/v1/videos/${videoId}/ask`, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
     signal: options?.signal,

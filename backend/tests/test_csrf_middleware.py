@@ -87,15 +87,14 @@ class TestCSRFMiddleware:
         assert resp.json() == {"ok": True}
 
     @pytest.mark.asyncio
-    async def test_post_with_bearer_token_passes(self, csrf_client):
-        """POST without Origin/Referer but with Bearer token should pass (API auth)."""
+    async def test_post_with_authorization_header_still_requires_origin(self, csrf_client):
+        """POST without Origin/Referer should not be allowed by a bearer-shaped header."""
         resp = await csrf_client.post(
             "/test",
-            headers={"Authorization": "Bearer some-jwt-token"},
+            headers={"Authorization": "Bearer opaque-api-key"},
             content="{}",
         )
-        assert resp.status_code == 200
-        assert resp.json() == {"ok": True}
+        assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_post_with_json_content_type_no_origin_returns_403(self, csrf_client):
@@ -108,8 +107,8 @@ class TestCSRFMiddleware:
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_post_without_origin_referer_bearer_returns_403(self, csrf_client):
-        """POST without Origin/Referer and no Bearer token should be 403."""
+    async def test_post_without_origin_referer_returns_403(self, csrf_client):
+        """POST without Origin/Referer should be 403."""
         resp = await csrf_client.post(
             "/test",
             headers={"Content-Type": "application/x-www-form-urlencoded"},

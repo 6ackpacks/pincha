@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 
-from pydantic import Field
 from pydantic_settings import BaseSettings
 
 # Find .env.local first, then .env in project root (one level up from backend/)
@@ -59,9 +58,6 @@ class Settings(BaseSettings):
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     WIKI_ARTICLE_LIMIT: int = 20
     WIKI_COMPILER_MODEL: str = "gpt-4o-mini"
-    # Phase 0 single-user bypass: fixed user UUID used when no auth
-    ADMIN_USER_ID: str = "00000000-0000-0000-0000-000000000001"
-    ADMIN_TOKEN: str = ""
 
     # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
     # 讯飞语音识别（录音文件转写大模型）
@@ -78,23 +74,7 @@ class Settings(BaseSettings):
     # RapidAPI YouTube 音频下载（yt-dlp 被封时的付费兜底）
     RAPIDAPI_KEY: str = ""
 
-    # Optional OAuth2 provider.
-    WATCHA_CLIENT_ID: str = ""
-    WATCHA_CLIENT_SECRET: str = ""
-    WATCHA_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/callback"
-    WATCHA_PROXY_URL: str = ""
-    OAUTH_AUTHORIZE_URL: str = "https://example.com/oauth/authorize"
-    OAUTH_TOKEN_URL: str = "https://example.com/oauth/api/token"
-    OAUTH_USERINFO_URL: str = "https://example.com/oauth/api/userinfo"
-
-    # JWT 密钥（生产环境必须使用至少 32 字符的随机字符串）
-    # 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"
-    JWT_SECRET_KEY: str = Field(..., min_length=32)
-
-    # Initial admin: watcha_user_id that auto-promotes to admin on first login
-    INITIAL_ADMIN_WATCHA_ID: int | None = None
-
-    # Frontend base URL (used for post-login redirect and CORS)
+    # Frontend base URL used for CORS.
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Curate module

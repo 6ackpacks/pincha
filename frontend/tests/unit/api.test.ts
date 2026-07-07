@@ -61,7 +61,7 @@ describe('API Client', () => {
       await expect(apiModule.getVideos()).rejects.toThrow('Failed to fetch')
     })
 
-    it('请求自动带上 credentials: include', async () => {
+    it('请求不再显式携带浏览器凭据', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
@@ -73,7 +73,7 @@ describe('API Client', () => {
       await apiModule.getVideos()
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ credentials: 'include' }),
+        expect.not.objectContaining({ credentials: 'include' }),
       )
     })
 

@@ -31,10 +31,7 @@ export function Navbar({ heroInView }: NavbarProps) {
           <Link href="#features" prefetch={false} onClick={(e) => { e.preventDefault(); document.querySelector("#features")?.scrollIntoView({ behavior: "smooth" }); }} className="pointer-events-auto text-[15px] font-semibold text-[#0f1f17] hover:text-[#166534] transition-colors">如何品读</Link>
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 sm:gap-3">
-          <Link href="/login" prefetch={false} className="whitespace-nowrap px-2 py-2 text-[15px] font-semibold text-[#0f1f17] hover:text-[#166534] rounded-full transition-colors sm:px-4">
-            登录
-          </Link>
-          <MagneticBtn href="/login" className="whitespace-nowrap px-3 py-2 text-[14px] font-semibold bg-[#166534] text-white rounded-full hover:bg-[#14532d] shadow-[0_14px_30px_-22px_rgba(5,150,105,0.85)] sm:px-4">
+          <MagneticBtn href="/videos" className="whitespace-nowrap px-3 py-2 text-[14px] font-semibold bg-[#166534] text-white rounded-full hover:bg-[#14532d] shadow-[0_14px_30px_-22px_rgba(5,150,105,0.85)] sm:px-4">
             开始品读
           </MagneticBtn>
         </div>

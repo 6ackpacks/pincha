@@ -366,12 +366,12 @@ export function FeaturesSection() {
                   每一次观看、阅读和追问，都会变成可以回看、检索、关联的个人知识。你不用记住内容在哪里，品猹会把线索留在知识库里。
                 </p>
                 <div className="mt-8 flex flex-wrap gap-3">
-                  <a
-                    href="/login"
+                  <Link
+                    href="/videos"
                     className="inline-flex h-12 items-center rounded-full bg-emerald-600 px-6 text-[15px] font-semibold text-white shadow-[0_18px_36px_-28px_rgba(5,150,105,0.9)] transition hover:bg-emerald-700"
                   >
                     开始品读
-                  </a>
+                  </Link>
                   <a
                     href="#features"
                     className="inline-flex h-12 items-center rounded-full border border-[#e6dccd] bg-white px-6 text-[15px] font-semibold text-[#10231c] transition hover:border-emerald-700/30 hover:text-emerald-700"

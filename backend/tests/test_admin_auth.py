@@ -1,65 +1,30 @@
-"""Admin API authentication tests.
-
-Verifies that Admin endpoints require an authenticated admin user
-(session cookie + is_admin=True) and reject non-admin or unauthenticated requests.
-"""
+"""Admin API tests for the single-user Local Owner mode."""
 
 import uuid
-from unittest.mock import patch, MagicMock
 
 import pytest
 from httpx import AsyncClient
-
-from app.config import settings
 
 
 API_PREFIX = "/api/v1/admin"
 
 
-class TestAdminAuthRequired:
-    """Admin endpoints must require authenticated admin user."""
-
+class TestAdminLocalOwner:
     @pytest.mark.asyncio
-    async def test_no_session_returns_401(self, raw_client: AsyncClient):
-        """Request without session cookie is rejected."""
+    async def test_admin_videos_uses_local_owner(self, raw_client: AsyncClient):
         resp = await raw_client.get(f"{API_PREFIX}/videos")
-        assert resp.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_non_admin_user_returns_403(self, client: AsyncClient):
-        """Authenticated non-admin user is rejected with 403."""
-        resp = await client.get(f"{API_PREFIX}/videos")
-        assert resp.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_admin_user_grants_access(self, client: AsyncClient, test_user):
-        """Authenticated admin user can access admin endpoints."""
-        test_user.is_admin = True
-        resp = await client.get(f"{API_PREFIX}/videos")
         assert resp.status_code == 200
 
-
-class TestAdminEndpointsCoverage:
-    """Verify multiple admin endpoints all enforce admin auth."""
+    @pytest.mark.asyncio
+    async def test_admin_user_management_is_removed(self, raw_client: AsyncClient):
+        resp = await raw_client.get(f"{API_PREFIX}/users")
+        assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_videos_list_requires_admin(self, client: AsyncClient):
-        resp = await client.get(f"{API_PREFIX}/videos")
-        assert resp.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_trigger_curate_requires_admin(self, client: AsyncClient):
-        resp = await client.post(f"{API_PREFIX}/curate-v2/trigger")
-        assert resp.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_delete_video_requires_admin(self, client: AsyncClient):
+    async def test_delete_missing_video_still_reaches_admin_handler(self, raw_client: AsyncClient):
         vid = str(uuid.uuid4())
-        resp = await client.delete(f"{API_PREFIX}/videos/{vid}")
-        assert resp.status_code == 403
-
-    @pytest.mark.asyncio
-    async def test_admin_can_list_videos(self, client: AsyncClient, test_user):
-        test_user.is_admin = True
-        resp = await client.get(f"{API_PREFIX}/videos")
-        assert resp.status_code == 200
+        resp = await raw_client.delete(
+            f"{API_PREFIX}/videos/{vid}",
+            headers={"Origin": "http://localhost:3000"},
+        )
+        assert resp.status_code == 404

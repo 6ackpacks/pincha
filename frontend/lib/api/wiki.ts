@@ -260,7 +260,6 @@ export function streamWikiAsk(
   };
   return fetch(`${API_BASE}/api/v1/wiki/ask`, {
     method: "POST",
-    credentials: "include",
     headers,
     body: JSON.stringify({ question, topic, history }),
     signal: options?.signal,

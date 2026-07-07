@@ -13,7 +13,6 @@ openai==2.8.0
 yt-dlp==2026.3.17
 pgvector==0.3.6
 minio==7.2.10
-python-jose[cryptography]==3.3.0
 youtube-transcript-api==1.0.3
 httpx==0.27.0
 tos==2.9.2

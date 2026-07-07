@@ -11,7 +11,6 @@ export async function GET(
 
   const backendRes = await fetch(backendUrl, {
     headers: {
-      cookie: req.headers.get("cookie") || "",
       "x-active-kb": req.headers.get("x-active-kb") || "",
     },
   });

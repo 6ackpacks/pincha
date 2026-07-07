@@ -1,13 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { House, Database, SignOut, Books, Sparkle, CaretLeft, CaretRight, UserCircle, Bell } from "@phosphor-icons/react";
+import { House, Database, Books, Sparkle, CaretLeft, CaretRight, UserCircle, Bell } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useQueryClient } from "@tanstack/react-query";
 import { useAtom } from "jotai";
-import { getMe, logout, getCurateV2UnreadCount } from "@/lib/api";
+import { getMe, getCurateV2UnreadCount } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { cdnUrl } from "@/lib/cdn";
 import { sidebarCollapsedAtom } from "@/atoms/sidebar";
@@ -35,10 +33,7 @@ function DefaultAvatar({ className }: { className?: string }) {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useAtom(sidebarCollapsedAtom);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const { data: me } = useQuery({
     queryKey: ["me"],
     queryFn: getMe,
@@ -57,22 +52,6 @@ export function Sidebar() {
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
-  };
-
-  const handleLogout = async () => {
-    if (isLoggingOut) return;
-    setIsLoggingOut(true);
-    try {
-      await logout();
-    } catch {
-      // Ignore network errors here; we still clear client state and move to login.
-    } finally {
-      queryClient.removeQueries({ queryKey: ["me"], exact: true });
-      queryClient.removeQueries({ queryKey: ["sessions"], exact: true });
-      if (typeof window !== "undefined") {
-        window.location.replace("/login");
-      }
-    }
   };
 
   return (
@@ -145,38 +124,15 @@ export function Sidebar() {
 
       {/* User */}
       <div className={cn("border-t border-zinc-100 shrink-0", collapsed ? "px-1.5 py-3" : "px-3 py-3")}>
-        {!me ? (
-          <Link
-            href="/login"
-            prefetch={false}
-            title="立即登录"
-            className={cn(
-              "group flex items-center rounded-xl transition-all duration-150",
-              collapsed ? "justify-center px-0 py-1.5" : "gap-2.5 px-2.5 py-2 hover:bg-zinc-50 border border-zinc-100"
-            )}
-          >
-            <DefaultAvatar className={collapsed ? "w-7 h-7" : "w-8 h-8 shrink-0"} />
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-900">
-                  <span>立即登录</span>
-                  <UserCircle size={13} weight="bold" className="text-zinc-400" />
-                </div>
-                <div className="text-[10px] text-zinc-400">登录后同步你的内容</div>
-              </div>
-            )}
-          </Link>
-        ) : (
-          <div className={cn("flex items-center gap-2.5 rounded-xl", collapsed ? "justify-center px-0 py-1.5" : "px-2.5 py-2 border border-zinc-100 bg-zinc-50")}>
+        <div className={cn("flex items-center gap-2.5 rounded-xl", collapsed ? "justify-center px-0 py-1.5" : "px-2.5 py-2 border border-zinc-100 bg-zinc-50")}>
             <div className="group/avatar relative shrink-0">
               {/* 头像：仅展示，点击不跳转 */}
               <div className="relative">
-                {me.avatar_url && !avatarFailed ? (
+                {me?.avatar_url ? (
                   <img
                     src={me.avatar_url}
-                    alt={me.nickname ?? "用户"}
+                    alt={me.nickname ?? "本地用户"}
                     className="w-7 h-7 object-cover rounded-full"
-                    onError={() => setAvatarFailed(true)}
                   />
                 ) : (
                   <DefaultAvatar className="w-7 h-7" />
@@ -217,40 +173,14 @@ export function Sidebar() {
             {!collapsed && (
               <div className="flex-1 min-w-0 text-left">
                 <p className="whitespace-normal break-all text-xs font-medium leading-snug text-zinc-950">
-                  {me.nickname ?? "用户"}
+                  {me?.nickname ?? "本地用户"}
                 </p>
-                <p className={cn(
-                  "mt-0.5 text-[10px] font-medium text-left",
-                  me.is_admin ? "text-red-500" : "text-zinc-400"
-                )}>
-                  {me.is_admin ? "管理员" : "个人"}
+                <p className="mt-0.5 text-left text-[10px] font-medium text-zinc-400">
+                  本地模式
                 </p>
               </div>
             )}
-            {!collapsed && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-                className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:text-zinc-900 hover:bg-white transition-colors disabled:opacity-50"
-                title="退出登录"
-              >
-                <SignOut size={14} weight="bold" />
-              </button>
-            )}
-            {collapsed && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-                className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 transition-colors disabled:opacity-50"
-                title="退出登录"
-              >
-                <SignOut size={14} weight="bold" />
-              </button>
-            )}
           </div>
-        )}
       </div>
     </aside>
   );

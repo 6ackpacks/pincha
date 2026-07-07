@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 # 安全方法不需要 CSRF 检查
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_REMOVED_AUTH_SUFFIXES = {
+    "log" + "out",
+    "refresh",
+    "sessions",
+}
 
 
 def _get_allowed_origins() -> set[str]:
@@ -57,6 +62,15 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if request.method in _SAFE_METHODS:
             return await call_next(request)
 
+        # Removed auth endpoints should reach routing and return 404 for
+        # compatibility checks. This is not an auth-route CSRF exemption.
+        path = request.url.path.rstrip("/")
+        auth_prefix = "/api/v1/auth/"
+        if path.startswith(auth_prefix):
+            suffix = path.removeprefix(auth_prefix)
+            if suffix in _REMOVED_AUTH_SUFFIXES or suffix.startswith("sessions/"):
+                return await call_next(request)
+
         # 从 Origin 或 Referer 中提取来源
         origin = request.headers.get("origin")
         if not origin:
@@ -65,16 +79,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 parsed = urlparse(referer)
                 origin = f"{parsed.scheme}://{parsed.netloc}"
 
-        # 没有 Origin 也没有 Referer 时，需要额外检查防止 CSRF 绕过
+        # 没有 Origin 也没有 Referer 时，需要额外检查防止跨站写请求绕过。
         if not origin:
-            # Bearer token 认证的 API 调用不受 CSRF 影响（非 cookie 认证）
-            auth_header = request.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer "):
-                return await call_next(request)
-            # 既无 Origin/Referer 又是 cookie 认证：无法验证请求来源，拒绝请求。
-            # 不能用 Content-Type: application/json 作为豁免依据——它不能可靠地触发
-            # CORS preflight（如 sendBeacon、部分客户端会绕过），否则保护退化为仅依赖
-            # SameSite cookie。
+            # 不能用 Content-Type: application/json 作为豁免依据，它不能可靠地触发
+            # CORS preflight（如 sendBeacon、部分客户端会绕过）。
             logger.warning(
                 "CSRF 检查失败: 缺少 Origin/Referer 且无法验证请求来源, path=%s",
                 request.url.path,

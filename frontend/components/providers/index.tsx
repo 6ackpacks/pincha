@@ -6,12 +6,6 @@ import { ThemeProvider } from "next-themes";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { makeQueryClient } from "@/lib/query-client";
-import { useSessionRefresh } from "@/hooks/use-session-refresh";
-
-function SessionRefreshGuard({ children }: { children: React.ReactNode }) {
-  useSessionRefresh();
-  return <>{children}</>;
-}
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -31,7 +25,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           enableSystem
           disableTransitionOnChange
         >
-          <SessionRefreshGuard>{children}</SessionRefreshGuard>
+          {children}
         </ThemeProvider>
       </JotaiProvider>
     </QueryClientProvider>

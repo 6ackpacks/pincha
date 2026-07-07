@@ -7,7 +7,6 @@ This document describes the public route structure and naming conventions for co
 | Area | Purpose |
 | --- | --- |
 | `/` | Product entry and primary navigation |
-| `/login` | User sign-in flow |
 | `/videos` | Submitted video and audio processing views |
 | `/videos/[id]` | Detail page for transcript, summary, citations, and mind map |
 | `/articles` | Article collection and analysis views |
@@ -16,7 +15,7 @@ This document describes the public route structure and naming conventions for co
 | `/curate` | Personal content feed and subscriptions |
 | `/trending` | Public discovery views |
 
-Internal admin, debug, test, and operations routes are intentionally excluded from the public route guide.
+Internal admin, debug, test, and operations routes are intentionally excluded from the public route guide. The community edition has no login, registration, or account switching routes.
 
 ## Directory Layout
 

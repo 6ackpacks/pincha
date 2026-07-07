@@ -27,7 +27,7 @@ from app.models.video import Video
 
 @dataclass
 class AuthDeps:
-    """Bundle of authenticated user + DB session."""
+    """Bundle of current Local Owner + DB session."""
 
     user: User
     db: AsyncSession
@@ -43,7 +43,7 @@ class AuthDeps:
 
 @dataclass
 class AuthKBDeps:
-    """Bundle of authenticated user + DB session + resolved KB ID."""
+    """Bundle of current Local Owner + DB session + resolved KB ID."""
 
     user: User
     db: AsyncSession

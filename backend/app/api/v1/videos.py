@@ -7,8 +7,6 @@ import uuid
 from typing import List
 from urllib.parse import urlparse
 
-import secrets as _secrets
-
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -16,7 +14,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user, get_optional_user
+from app.core.auth import get_current_user, get_optional_user, require_admin_user
 from app.core.rate_limit import limiter
 from app.core.url_validator import validate_url_async, SSRFError
 from app.core.sse_limiter import SSEConnectionGuard, sse_concurrency_guard
@@ -237,10 +235,7 @@ async def popular_videos(
     db: AsyncSession = Depends(get_session),
     limit: int = Query(20, ge=1, le=50),
 ):
-    """Return popular videos across all users, ranked by engagement score.
-
-    Public endpoint — no auth required so new/anonymous users see recommendations.
-    """
+    """Return popular videos across the local instance, ranked by engagement score."""
     videos = await video_service.list_popular_videos(db, limit=limit)
     return videos
 
@@ -326,14 +321,8 @@ async def add_video_to_library(
 
 
 @router.get("/health/pipeline")
-async def pipeline_health(x_admin_token: str | None = Header(None, alias="X-Admin-Token")):
-    """Check if pipeline dependencies are accessible. Requires admin token."""
-    admin_token = settings.ADMIN_TOKEN or os.environ.get("ADMIN_TOKEN", "")
-    if not admin_token:
-        if settings.ENVIRONMENT != "development":
-            raise HTTPException(status_code=503, detail="Admin token not configured")
-    elif not x_admin_token or not _secrets.compare_digest(x_admin_token, admin_token):
-        raise HTTPException(status_code=403, detail="Invalid admin token")
+async def pipeline_health(current_user: User = Depends(require_admin_user)):
+    """Check whether pipeline dependencies are accessible."""
     checks = {}
 
     # Check Redis

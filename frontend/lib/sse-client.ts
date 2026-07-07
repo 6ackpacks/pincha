@@ -80,7 +80,6 @@ export function createSSEConnection(options: SSEClientOptions): () => void {
     try {
       const res = await fetch(connectUrl, {
         method,
-        credentials: "include",
         headers: {
           ...(body ? { "Content-Type": "application/json" } : {}),
           ...(resumeOnReconnect && maxSeq > 0
@@ -93,10 +92,6 @@ export function createSSEConnection(options: SSEClientOptions): () => void {
       });
 
       if (!res.ok || !res.body) {
-        if (res.status === 401) {
-          onError?.(new Error("UNAUTHORIZED"));
-          return;
-        }
         throw new Error(`HTTP ${res.status}`);
       }
 

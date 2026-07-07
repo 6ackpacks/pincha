@@ -137,7 +137,6 @@ test_route "/img-proxy?url=https://example.com/img.jpg" "backend" "image proxy"
 test_route "/" "frontend" "root page"
 test_route "/dashboard" "frontend" "dashboard page"
 test_route "/videos/123" "frontend" "video detail page"
-test_route "/login" "frontend" "login page"
 test_route "/settings" "frontend" "settings page"
 
 # =============================================================================

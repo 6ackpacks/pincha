@@ -94,7 +94,7 @@ export default function PublicVideoPage() {
       }
       router.push(`/videos/${videoId}?addToKnowledge=1`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "请先登录后再收进知识库");
+      toast.error(err instanceof Error ? err.message : "加入知识库失败，请稍后重试");
     }
   };
 

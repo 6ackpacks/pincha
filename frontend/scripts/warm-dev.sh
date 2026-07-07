@@ -9,7 +9,6 @@ ROUTES=(
   "/knowledge"
   "/curate"
   "/learn"
-  "/login"
 )
 
 echo "Warming up dev server routes..."

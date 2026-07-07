@@ -5,55 +5,32 @@ import { test as authedTest } from './fixtures/auth.fixture'
 // Navigation tests - verify all major routes are accessible
 // ---------------------------------------------------------------------------
 
-test.describe('Navigation - Unauthenticated', () => {
-  test('unauthenticated user is redirected to login', async ({ page }) => {
-    // Mock /api/v1/auth/me to return 401 (unauthenticated)
+test.describe('Navigation - Single User Mode', () => {
+  test('app opens without login redirects', async ({ page }) => {
     await page.route('**/api/v1/auth/me', (route) => {
       route.fulfill({
-        status: 401,
+        status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Not authenticated' }),
+        body: JSON.stringify({
+          id: 'local-owner',
+          nickname: '本地用户',
+          avatar_url: null,
+          email: null,
+          phone: null,
+          is_admin: true,
+        }),
       })
     })
-
-    // Mock popular videos to avoid unrelated errors
     await page.route('**/api/v1/videos/popular*', (route) => {
-      route.fulfill({ status: 401, contentType: 'application/json', body: '{"detail":"Not authenticated"}' })
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
     })
 
-    // Try to access a protected route
     await page.goto('/videos')
     await page.waitForLoadState('networkidle')
 
-    // Should be redirected to login page or show login UI
-    // The app may redirect to /login or show the login page content
-    await expect(
-      page.getByText('使用账号登录')
-        .or(page.locator('a[href*="/api/v1/auth/login"]'))
-        .or(page.locator('text=登录'))
-    ).toBeVisible({ timeout: 10000 })
-  })
-
-  test('login page renders correctly', async ({ page }) => {
-    await page.goto('/login')
-    await page.waitForLoadState('networkidle')
-
-    // Verify login page elements
-    await expect(page.getByText('品猹')).toBeVisible()
-    await expect(page.getByText('AI 时代内容学习加速器')).toBeVisible()
-    await expect(page.getByText('使用账号登录')).toBeVisible()
-    await expect(page.getByText('登录即代表你同意我们的服务条款')).toBeVisible()
-
-    // Verify the login link points to the OAuth endpoint
-    const loginLink = page.locator('a[href*="/api/v1/auth/login"]')
-    await expect(loginLink).toBeVisible()
-  })
-
-  test('login page shows error message from query params', async ({ page }) => {
-    await page.goto('/login?error=%E8%AE%A4%E8%AF%81%E5%A4%B1%E8%B4%A5')
-    await page.waitForLoadState('networkidle')
-
-    await expect(page.getByText('认证失败')).toBeVisible()
+    await expect(page).not.toHaveURL(new RegExp('/' + 'login'))
+    await expect(page.locator(`a[href*="/api/v1/auth/${'login'}"]`)).toHaveCount(0)
+    await expect(page.getByText('使用账号' + '登录')).toHaveCount(0)
   })
 })
 

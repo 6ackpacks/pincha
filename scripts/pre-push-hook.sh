@@ -15,7 +15,6 @@ PATTERNS=(
   '[A-Za-z0-9_]*API_KEY[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
   '[A-Za-z0-9_]*SECRET[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
   '[A-Za-z0-9_]*TOKEN[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
-  'JWT_SECRET_KEY[[:space:]]*=[[:space:]]*[a-zA-Z0-9_/+=-]{32,}'
   'AKIA[0-9A-Z]{16}'
   'gh[pousr]_[A-Za-z0-9_]{20,}'
   '-----BEGIN [A-Z ]*PRIVATE KEY-----'
