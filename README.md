@@ -1,45 +1,61 @@
-# Pincha
+<p align="center">
+  <img src="frontend/public/logo.svg" alt="Pincha" width="72" />
+</p>
 
-Pincha is an open-source app for collecting, transcribing, summarizing, and organizing long-form video and audio content. It provides a web UI, a FastAPI backend, background workers, PostgreSQL with pgvector, Redis, and optional object storage.
+<h1 align="center">Pincha</h1>
 
-## What It Does
+<p align="center">
+  Turn long videos and audio into transcripts, summaries, mind maps, and a searchable personal knowledge base.
+</p>
 
-- Submit video or audio URLs for processing.
-- Extract captions or transcribe audio.
-- Generate summaries, highlights, mind maps, and searchable knowledge entries.
-- Browse processed content from a local web interface.
-- Run locally with Docker Compose.
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-111827"></a>
+  <a href="docker-compose.yml"><img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2563eb"></a>
+  <a href="CONTRIBUTING.md"><img alt="Contributions" src="https://img.shields.io/badge/contributions-welcome-16a34a"></a>
+</p>
 
-## What It Does Not Do
+<p align="center">
+  <img src="frontend/public/product-screenshot.png" alt="Pincha workspace screenshot" width="920" />
+</p>
 
-- It does not ship with production credentials.
-- It does not include hosted Pincha operations, admin jobs, or private deployment workflows.
-- It does not provide legal access around platform restrictions; configure providers, cookies, or proxies only where you are allowed to do so.
+## Why Pincha
+
+Pincha is a self-hosted AI content workspace for people who learn from long-form media. Paste a video or audio link, let the backend extract or transcribe the content, then work with structured summaries, citations, mind maps, and saved knowledge entries.
+
+## Features
+
+| Capability | What it does |
+| --- | --- |
+| Video and audio intake | Submit media URLs and process them asynchronously. |
+| Transcript pipeline | Use platform captions, optional transcript providers, or OpenAI-compatible speech-to-text. |
+| Structured summaries | Generate concise, detailed, and navigable summaries. |
+| Mind maps | Convert long content into visual structure. |
+| Knowledge base | Save processed content for search and later review. |
+| Self-hosted stack | Runs with Next.js, FastAPI, PostgreSQL + pgvector, Redis, and Docker Compose. |
 
 ## Quick Start
 
 Requirements:
 
 - Docker and Docker Compose
-- A Typeless API key for speech-to-text
-- An OpenAI-compatible LLM API key for summary generation
+- An OpenAI-compatible LLM API key
+- Optional: an OpenAI-compatible speech-to-text endpoint for audio transcription
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit the required values:
 
 ```env
 JWT_SECRET_KEY=replace_with_a_long_random_secret_at_least_32_chars
 POSTGRES_PASSWORD=change_me_to_a_real_password
 MINIO_ACCESS_KEY=replace_me
 MINIO_SECRET_KEY=replace_me
-TYPELESS_API_KEY=replace_with_your_typeless_api_key
 OPENAI_API_KEY=replace_with_your_llm_api_key
 ```
 
-Start the full stack:
+Start the stack:
 
 ```bash
 docker compose up --build
@@ -47,46 +63,28 @@ docker compose up --build
 
 Open:
 
-- Frontend: http://localhost:3000
-- Backend health: http://localhost:8000/health
+- App: http://localhost:3000
+- API health: http://localhost:8000/health
 
-For infrastructure-only local development:
+## Speech-to-Text
+
+Pincha does not require a specific speech provider. For audio transcription, configure any OpenAI-compatible endpoint:
+
+```env
+WHISPER_API_BASE=https://api.example.com/v1
+WHISPER_API_KEY=replace_with_your_asr_api_key
+WHISPER_MODEL=whisper-1
+```
+
+If a video already has usable captions, Pincha can process it without ASR.
+
+## Development
+
+Run infrastructure only:
 
 ```bash
 docker compose -f docker-compose.infra.yml up -d
 ```
-
-## Typeless Setup
-
-Pincha is designed to work with Typeless for audio transcription:
-
-1. Create a Typeless API key.
-2. Put it in `.env` as `TYPELESS_API_KEY`.
-3. Keep `TYPELESS_MODEL=whisper-1`, or change it if your Typeless account uses a different model name.
-4. Submit a video or audio URL from the web UI.
-
-Advanced users can override `TYPELESS_API_BASE`. If `TYPELESS_API_KEY` is not set, Pincha can fall back to an OpenAI-compatible speech-to-text endpoint through `WHISPER_API_BASE` and `WHISPER_API_KEY`.
-
-## Documentation
-
-- [Deployment](docs/deployment.md)
-- [Environment variables](.env.example)
-- [Frontend routes](docs/frontend-routes.md)
-- [Design system](docs/design-system.md)
-- [Contributing](CONTRIBUTING.md)
-
-## High-Level Architecture
-
-Pincha has four main parts:
-
-- `frontend/`: Next.js web application.
-- `backend/`: FastAPI API service and processing logic.
-- Background workers: asynchronous processing for extraction, transcription, summaries, and indexing.
-- Infrastructure: PostgreSQL + pgvector, Redis, and optional S3-compatible object storage.
-
-Implementation details that are only relevant to hosted operations are intentionally not documented in this public repository.
-
-## Development
 
 Backend:
 
@@ -105,18 +103,33 @@ npm run lint
 npm run build
 ```
 
-## Contributing
+## Architecture
 
-Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+```text
+frontend/        Next.js app
+backend/         FastAPI API and processing services
+workers          background media processing and indexing
+postgres         relational data + pgvector
+redis            cache, queues, and realtime coordination
+object storage   optional S3-compatible asset storage
+```
 
-Do not include tokens, private logs, account identifiers, production hostnames, or credentials in issues or pull requests.
+Hosted operations, private workflows, and internal product planning documents are intentionally not included in this public repository.
+
+## Documentation
+
+- [Deployment](docs/deployment.md)
+- [Environment example](.env.example)
+- [Frontend routes](docs/frontend-routes.md)
+- [Design system](docs/design-system.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Security
 
-Please do not open public issues for security vulnerabilities. Report security concerns through the repository security advisory flow or contact the maintainers privately.
+Do not commit `.env`, tokens, private logs, account identifiers, production hostnames, or credentials.
 
-If you accidentally committed a secret, rotate it immediately. Removing a secret from a later commit does not remove it from Git history.
+If a secret is committed accidentally, rotate it immediately. Removing it in a later commit does not remove it from Git history.
 
 ## License
 
-This project is licensed under the terms in [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

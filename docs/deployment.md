@@ -18,11 +18,11 @@ POSTGRES_PASSWORD=replace_with_a_strong_database_password
 MINIO_ACCESS_KEY=replace_with_object_storage_user
 MINIO_SECRET_KEY=replace_with_object_storage_password
 JWT_SECRET_KEY=replace_with_a_long_random_secret
-TYPELESS_API_KEY=replace_with_your_typeless_api_key
+WHISPER_API_KEY=replace_with_your_asr_api_key
 OPENAI_API_KEY=replace_with_your_llm_api_key
 ```
 
-`TYPELESS_API_KEY` enables speech-to-text. Most users only need to paste the key and keep the default `TYPELESS_MODEL`.
+`WHISPER_API_KEY` enables optional speech-to-text when paired with `WHISPER_API_BASE`. If submitted videos already include usable captions, ASR can stay disabled.
 
 ## Full Stack
 

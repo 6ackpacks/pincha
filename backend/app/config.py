@@ -46,12 +46,6 @@ class Settings(BaseSettings):
     SUMMARY_API_BASE: str = "https://api.openai.com/v1"
     YOUTUBE_COOKIES_PATH: str = "/app/cookies/cookies.txt"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
-    # Typeless speech-to-text. If TYPELESS_API_KEY is set, ASR uses this
-    # endpoint before the legacy WHISPER_* settings.
-    TYPELESS_API_KEY: str = ""
-    TYPELESS_API_BASE: str = "https://api.typeless.com/v1"
-    TYPELESS_MODEL: str = "whisper-1"
-
     # OpenAI-compatible speech-to-text endpoint.
     WHISPER_API_BASE: str = ""
     WHISPER_API_KEY: str = ""

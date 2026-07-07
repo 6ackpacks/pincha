@@ -12,7 +12,6 @@ PATTERNS=(
   'OPENAI_API_KEY[[:space:]]*=[[:space:]]*sk-[a-zA-Z0-9_-]{20,}'
   'ANTHROPIC_API_KEY[[:space:]]*=[[:space:]]*sk-ant-[a-zA-Z0-9_-]{20,}'
   'SENTRY_AUTH_TOKEN[[:space:]]*=[[:space:]]*sntrys_[a-zA-Z0-9]{20,}'
-  'TYPELESS_API_KEY[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
   '[A-Za-z0-9_]*API_KEY[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
   '[A-Za-z0-9_]*SECRET[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
   '[A-Za-z0-9_]*TOKEN[[:space:]]*=[[:space:]]*[a-zA-Z0-9_./+=-]{20,}'
