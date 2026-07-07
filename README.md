@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/logo.svg" alt="Pincha" width="72" />
+  <img src="frontend/public/brand/pincha-script.svg" alt="Pincha" width="148" />
 </p>
 
 <h1 align="center">Pincha</h1>
