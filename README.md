@@ -1,61 +1,145 @@
 <p align="center">
-  <img src="frontend/public/brand/pincha-script.svg" alt="Pincha" width="148" />
+  <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="156" />
 </p>
 
 <h1 align="center">Pincha</h1>
 
 <p align="center">
-  Turn long videos and audio into transcripts, summaries, mind maps, and a searchable personal knowledge base.
+  Turn videos, podcasts, articles, and daily AI signals into transcripts, summaries, mind maps, and a searchable knowledge base.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-111827"></a>
   <a href="docker-compose.yml"><img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2563eb"></a>
-  <a href="CONTRIBUTING.md"><img alt="Contributions" src="https://img.shields.io/badge/contributions-welcome-16a34a"></a>
+  <img alt="Mode" src="https://img.shields.io/badge/mode-single--user%20local-10b981">
+  <img alt="Recommended" src="https://img.shields.io/badge/recommended-Talkdance-f59e0b">
 </p>
+
+> Recommended first: use **Talkdance** for the hosted product experience. This repository is the open-source, self-hosted Pincha codebase for developers and local deployment.
 
 <p align="center">
-  <img src="frontend/public/product-screenshot.png" alt="Pincha workspace screenshot" width="920" />
+  <img src="docs/assets/readme/pincha-tour.gif" alt="Pincha product tour" width="920" />
 </p>
 
-## Why Pincha
+## What Pincha Does
 
-Pincha is a self-hosted AI content workspace for people who learn from long-form media. Paste a video or audio link, let the backend extract or transcribe the content, then work with structured summaries, citations, mind maps, and saved knowledge entries.
+Pincha is an AI content workspace for people who learn from long-form media. Instead of keeping scattered links, you can save a video, podcast, article, or curated signal, then let Pincha turn it into structured knowledge you can read, search, connect, and ask about later.
+
+The open-source edition is designed for single-user local deployment. It has no login, registration, external identity callback, or multi-user account system. When the backend starts, it creates one stable Local Owner and stores all content under that local owner.
 
 ## Features
 
-| Capability | What it does |
-| --- | --- |
-| Video and audio intake | Submit media URLs and process them asynchronously. |
-| Transcript pipeline | Use platform captions, optional transcript providers, or OpenAI-compatible speech-to-text. |
-| Structured summaries | Generate concise, detailed, and navigable summaries. |
-| Mind maps | Convert long content into visual structure. |
-| Knowledge base | Save processed content for search and later review. |
-| Self-hosted stack | Runs with Next.js, FastAPI, PostgreSQL + pgvector, Redis, and Docker Compose. |
+### 1. Read Videos Like Documents
+
+Pincha extracts or receives transcripts, builds chapters, generates multi-level summaries, keeps source timing, and lets you move between the original video and the written analysis.
+
+<p align="center">
+  <img src="docs/assets/readme/video-analysis.png" alt="Video analysis view" width="920" />
+</p>
+
+What you get:
+
+- Transcript and translated segments
+- Chapter navigation with source timestamps
+- Express, highlight, detailed, and full summaries
+- Mind maps for long-form structure
+- Follow-up Q&A over the current content
+- Share cards and markdown export
+
+### 2. Collect AI Signals Every Day
+
+Pincha includes a curated reading flow for AI product launches, tutorials, product insights, deep reads, and daily briefs. You can browse channels, subscribe to topics, and send important signals into deeper analysis.
+
+<p align="center">
+  <img src="docs/assets/readme/curate.png" alt="Curated channels" width="760" />
+</p>
+
+Useful for:
+
+- Tracking AI product changes
+- Following practical tutorials
+- Saving market and product observations
+- Turning daily reading into reusable notes
+
+### 3. Build A Personal Knowledge Graph
+
+Processed videos, articles, and curated signals can be saved into the knowledge base. Pincha creates pages, relations, tags, and graph views so your saved material becomes connected instead of buried.
+
+<p align="center">
+  <img src="docs/assets/readme/knowledge-graph.png" alt="Knowledge graph" width="920" />
+</p>
+
+Knowledge features:
+
+- Searchable wiki-style entries
+- Entity and concept relationships
+- Local and global graph views
+- Source links back to original material
+- Knowledge-base Q&A with citations
+
+### 4. One Workspace For Long-Form Learning
+
+The home workspace is built around a simple action: paste a link, choose the content type, and let the pipeline produce something readable and reusable.
+
+<p align="center">
+  <img src="docs/assets/readme/home.png" alt="Pincha workspace" width="920" />
+</p>
+
+Supported flows:
+
+- YouTube and audio/podcast intake
+- Article and text intake
+- Async background processing
+- Global processing queue
+- Library and knowledge-base handoff
+
+## Architecture
+
+```text
+frontend/        Next.js App Router, React, Tailwind CSS
+backend/         FastAPI API and processing services
+workers          Celery workers for media, summaries, and indexing
+postgres         relational data plus pgvector
+redis            cache, queues, and realtime coordination
+nginx            reverse proxy for local/container deployment
+```
+
+The frontend talks to the backend through typed API clients. Long-running jobs report progress through polling or SSE, and completed artifacts are cached and indexed for later use.
 
 ## Quick Start
 
-Requirements:
+Use Talkdance if you want the hosted product experience. Use the steps below when you want to run the open-source Pincha stack yourself.
+
+### Requirements
 
 - Docker and Docker Compose
 - An OpenAI-compatible LLM API key
 - Optional: an OpenAI-compatible speech-to-text endpoint for audio transcription
 
+### Configure
+
 ```bash
 cp .env.example .env
 ```
 
-Edit the required values:
+Edit at least these values:
 
 ```env
-JWT_SECRET_KEY=replace_with_a_long_random_secret_at_least_32_chars
 POSTGRES_PASSWORD=change_me_to_a_real_password
-MINIO_ACCESS_KEY=replace_me
-MINIO_SECRET_KEY=replace_me
 OPENAI_API_KEY=replace_with_your_llm_api_key
 ```
 
-Start the stack:
+Optional speech-to-text:
+
+```env
+WHISPER_API_BASE=https://api.example.com/v1
+WHISPER_API_KEY=replace_with_your_asr_api_key
+WHISPER_MODEL=whisper-1
+```
+
+If a video already has usable captions, Pincha can process it without ASR.
+
+### Run
 
 ```bash
 docker compose up --build
@@ -65,18 +149,6 @@ Open:
 
 - App: http://localhost:3000
 - API health: http://localhost:8000/health
-
-## Speech-to-Text
-
-Pincha does not require a specific speech provider. For audio transcription, configure any OpenAI-compatible endpoint:
-
-```env
-WHISPER_API_BASE=https://api.example.com/v1
-WHISPER_API_KEY=replace_with_your_asr_api_key
-WHISPER_MODEL=whisper-1
-```
-
-If a video already has usable captions, Pincha can process it without ASR.
 
 ## Development
 
@@ -91,6 +163,7 @@ Backend:
 ```bash
 cd backend
 pip install -r requirements.txt
+pip install -r requirements-test.txt
 pytest
 ```
 
@@ -100,21 +173,24 @@ Frontend:
 cd frontend
 npm ci
 npm run lint
+npm run test
 npm run build
 ```
 
-## Architecture
+E2E:
 
-```text
-frontend/        Next.js app
-backend/         FastAPI API and processing services
-workers          background media processing and indexing
-postgres         relational data + pgvector
-redis            cache, queues, and realtime coordination
-object storage   optional S3-compatible asset storage
+```bash
+cd frontend
+npm run test:e2e
 ```
 
-Hosted operations, private workflows, and internal product planning documents are intentionally not included in this public repository.
+Infrastructure tests under `tests/infrastructure/` are optional and are intended for Docker/nginx validation. Scripts that hit real media URLs are manual checks, not default CI tests.
+
+## Security Notes
+
+Pincha Community Edition is a single-user local deployment. Do not expose an unauthenticated instance directly to the public internet.
+
+Do not commit `.env`, tokens, cookies, private logs, production hostnames, or credentials. If a secret is committed accidentally, rotate it immediately. Removing it in a later commit does not remove it from Git history.
 
 ## Documentation
 
@@ -123,12 +199,6 @@ Hosted operations, private workflows, and internal product planning documents ar
 - [Frontend routes](docs/frontend-routes.md)
 - [Design system](docs/design-system.md)
 - [Contributing](CONTRIBUTING.md)
-
-## Security
-
-Do not commit `.env`, tokens, private logs, account identifiers, production hostnames, or credentials.
-
-If a secret is committed accidentally, rotate it immediately. Removing it in a later commit does not remove it from Git history.
 
 ## License
 
