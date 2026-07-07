@@ -1,7 +1,7 @@
-"""Curate v2 — Content fetcher from watcha.cn API.
+"""Curate v2 content fetcher.
 
-Fetches yesterday's posts and reviews from multiple endpoints,
-deduplicates, and returns normalized FetchedItem instances.
+Fetches posts and reviews from configured endpoints, deduplicates, and returns
+normalized FetchedItem instances.
 
 Designed to run in a sync Celery task context.
 """
@@ -9,6 +9,7 @@ Designed to run in a sync Celery task context.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -22,20 +23,24 @@ from .content_parser import extract_plain_text
 logger = logging.getLogger(__name__)
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-BASE_URL = "https://watcha.cn/api/v2"
+BASE_URL = os.getenv("CURATE_SOURCE_API_BASE", "https://example.com/api/v2")
+PUBLIC_BASE_URL = os.getenv("CURATE_SOURCE_PUBLIC_BASE", "https://example.com").rstrip("/")
 PAGE_LIMIT = 100
 REQUEST_TIMEOUT = 30.0
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2.0
 POLITE_DELAY = 1.0
 
-# Official / curated user IDs
-OFFICIAL_USER_IDS = {10010174, 10010182, 10031720}
+OFFICIAL_USER_IDS = {
+    int(value)
+    for value in os.getenv("CURATE_OFFICIAL_USER_IDS", "").replace(" ", "").split(",")
+    if value.isdigit()
+}
 
 
 @dataclass
 class FetchedItem:
-    """Normalized content item from watcha.cn."""
+    """Normalized content item from the configured source."""
 
     source_type: str  # "post", "review", "product"
     source_id: int
@@ -221,7 +226,7 @@ def _parse_item(raw: dict[str, Any]) -> FetchedItem | None:
         if published_at is None:
             return None
 
-        original_url = raw.get("url") or f"https://watcha.cn/discuss/{source_id}"
+        original_url = raw.get("url") or f"{PUBLIC_BASE_URL}/discuss/{source_id}"
 
         product_id = None
         product = raw.get("product") or raw.get("subject")
@@ -273,7 +278,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 @dataclass
 class FetchedProduct:
-    """Normalized product item from watcha.cn."""
+    """Normalized product item from the configured source."""
 
     product_id: int
     slug: str
@@ -368,7 +373,7 @@ def _parse_product_no_floor(raw: dict[str, Any], window_end: datetime) -> "Fetch
             review_count=int(stats.get("review_count", 0)),
             upvotes=int(stats.get("upvotes", 0) or raw.get("upvotes", 0)),
             published_at=created,
-            original_url=f"https://watcha.cn/products/{slug}",
+            original_url=f"{PUBLIC_BASE_URL}/products/{slug}",
         )
     except (KeyError, TypeError, ValueError) as e:
         logger.debug("Failed to parse product: %s — %s", raw.get("id"), e)

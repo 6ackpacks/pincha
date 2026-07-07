@@ -163,17 +163,6 @@ def upgrade() -> None:
         ON CONFLICT (slug) DO NOTHING;
     """)
 
-    # --- Seed data: channel_sources (watcha.cn official accounts) ---
-    op.execute("""
-        INSERT INTO curate_channel_sources (channel_id, name, platform, external_user_id, is_official, is_active)
-        VALUES
-            (1, '观猹官方-产品', 'watcha', '10010174', TRUE, TRUE),
-            (2, '观猹官方-教程', 'watcha', '10010182', TRUE, TRUE),
-            (3, '观猹官方-洞察', 'watcha', '10031720', TRUE, TRUE),
-            (4, '观猹社区-深度', 'watcha', NULL, FALSE, TRUE),
-            (5, '观猹官方-简报', 'watcha', '10010174', TRUE, TRUE);
-    """)
-
     # Reset sequence to avoid conflicts with future inserts
     op.execute("SELECT setval('curate_channels_id_seq', (SELECT MAX(id) FROM curate_channels));")
 

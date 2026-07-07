@@ -71,7 +71,7 @@ def _map_exception(exc: BaseException) -> LLMError:
 class LLMClient:
     """Thin LLM client using openai.AsyncOpenAI.
 
-    Wraps the OpenAI-compatible gateway (DashScope, Tokendance, etc.)
+    Wraps an OpenAI-compatible gateway.
     with unified exception handling and streaming support.
     """
 

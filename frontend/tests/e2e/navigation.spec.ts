@@ -28,7 +28,7 @@ test.describe('Navigation - Unauthenticated', () => {
     // Should be redirected to login page or show login UI
     // The app may redirect to /login or show the login page content
     await expect(
-      page.getByText('使用观猹账号登录')
+      page.getByText('使用账号登录')
         .or(page.locator('a[href*="/api/v1/auth/login"]'))
         .or(page.locator('text=登录'))
     ).toBeVisible({ timeout: 10000 })
@@ -41,7 +41,7 @@ test.describe('Navigation - Unauthenticated', () => {
     // Verify login page elements
     await expect(page.getByText('品猹')).toBeVisible()
     await expect(page.getByText('AI 时代内容学习加速器')).toBeVisible()
-    await expect(page.getByText('使用观猹账号登录')).toBeVisible()
+    await expect(page.getByText('使用账号登录')).toBeVisible()
     await expect(page.getByText('登录即代表你同意我们的服务条款')).toBeVisible()
 
     // Verify the login link points to the OAuth endpoint

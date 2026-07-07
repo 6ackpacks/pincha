@@ -41,7 +41,7 @@ class CurateChannel(Base):
 
 
 class CurateChannelSource(Base):
-    """A content source linked to a channel (e.g. a watcha.cn user feed)."""
+    """A content source linked to a channel."""
     __tablename__ = "curate_channel_sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

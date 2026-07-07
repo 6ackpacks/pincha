@@ -1,4 +1,4 @@
-"""观猹 OAuth2 login, callback, session endpoints."""
+"""OAuth2 login, callback, and session endpoints."""
 import json
 import logging
 import secrets
@@ -32,9 +32,9 @@ _COOKIE_KWARGS = {
     "path": "/",
 }
 
-_WATCHA_AUTH_URL = "https://watcha.cn/oauth/authorize"
-_WATCHA_TOKEN_URL = "https://watcha.cn/oauth/api/token"
-_WATCHA_USERINFO_URL = "https://watcha.cn/oauth/api/userinfo"
+_WATCHA_AUTH_URL = settings.OAUTH_AUTHORIZE_URL
+_WATCHA_TOKEN_URL = settings.OAUTH_TOKEN_URL
+_WATCHA_USERINFO_URL = settings.OAUTH_USERINFO_URL
 
 _COOKIE_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 _STATE_TTL = 600  # 10 minutes
@@ -106,10 +106,10 @@ async def callback(
             )
 
         if token_resp.status_code != 200:
-            logger.error("观猹 token 交换失败: status=%d body=%s", token_resp.status_code, token_resp.text[:500])
+            logger.error("OAuth token exchange failed: status=%d body=%s", token_resp.status_code, token_resp.text[:500])
             return _error_redirect("授权码交换失败")
         token_data = token_resp.json()
-        logger.info("观猹 token 交换成功: access_token=%s, refresh_token=%s",
+        logger.info("OAuth token exchange succeeded: access_token=%s, refresh_token=%s",
                     "present" if token_data.get("access_token") else "missing",
                     "present" if token_data.get("refresh_token") else "missing")
         if "error" in token_data:
@@ -119,13 +119,13 @@ async def callback(
 
         watcha_access_token = token_data.get("access_token", "")
         if not watcha_access_token:
-            logger.error("观猹 token 交换成功但 access_token 为空: keys=%s", list(token_data.keys()))
+            logger.error("OAuth token exchange succeeded but access_token is empty: keys=%s", list(token_data.keys()))
             return _error_redirect("授权令牌为空，请重试")
         watcha_refresh_token = token_data.get("refresh_token")
         expires_in = token_data.get("expires_in", 1800)
         token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
-        # 2. Fetch user info from Watcha (观猹不接受 Bearer header，需用 query param)
+        # 2. Fetch user info. This provider expects access_token as a query param.
         async with httpx.AsyncClient(**_HTTPX_KWARGS) as client:
             info_resp = await client.get(
                 _WATCHA_USERINFO_URL,
@@ -133,7 +133,7 @@ async def callback(
             )
 
         if info_resp.status_code != 200:
-            logger.error("观猹 userinfo 失败: status=%d body=%s", info_resp.status_code, info_resp.text[:500])
+            logger.error("OAuth userinfo failed: status=%d body=%s", info_resp.status_code, info_resp.text[:500])
             return _error_redirect("获取用户信息失败")
         info_body = info_resp.json()
 
@@ -149,7 +149,7 @@ async def callback(
         elif "user_id" in info_body:
             data = info_body
         else:
-            logger.error("观猹 userinfo 响应格式未知: %s", str(info_body)[:500])
+            logger.error("OAuth userinfo response shape is unknown: %s", str(info_body)[:500])
             return _error_redirect("获取用户信息失败")
 
         watcha_user_id: int = data["user_id"]
@@ -213,10 +213,10 @@ async def callback(
         return response
 
     except httpx.TimeoutException as e:
-        logger.error("观猹 OAuth 请求超时: %s", e)
-        return _error_redirect("连接观猹服务超时，请重试")
+        logger.error("OAuth request timed out: %s", e)
+        return _error_redirect("连接认证服务超时，请重试")
     except Exception as e:
-        logger.error("观猹 OAuth 登录异常: %s", e, exc_info=True)
+        logger.error("OAuth login failed: %s", e, exc_info=True)
         return _error_redirect("登录过程出错，请重试")
 
 

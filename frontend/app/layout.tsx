@@ -52,8 +52,6 @@ export default function RootLayout({
           }}
         />
         <link rel="preload" as="image" href="/brand/pincha-script.svg" type="image/svg+xml" fetchPriority="high" />
-        <link rel="preconnect" href="https://pincha.tos-cn-beijing.volces.com" />
-        <link rel="dns-prefetch" href="https://pincha.tos-cn-beijing.volces.com" />
       </head>
       <body suppressHydrationWarning>
         <Providers>

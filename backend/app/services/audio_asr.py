@@ -312,21 +312,25 @@ def transcribe_with_asr(audio_path: str) -> list[dict]:
             f"音频文件过大 ({file_size // 1024 // 1024}MB)，超出 Whisper 500MB 限制"
         )
 
-    # 使用独立的 Whisper ASR endpoint，而非 LLM 摘要网关
-    if not settings.WHISPER_API_BASE:
+    api_key = settings.TYPELESS_API_KEY or settings.WHISPER_API_KEY or settings.OPENAI_API_KEY
+    api_base = settings.TYPELESS_API_BASE if settings.TYPELESS_API_KEY else settings.WHISPER_API_BASE
+    model = settings.TYPELESS_MODEL if settings.TYPELESS_API_KEY else settings.WHISPER_MODEL
+
+    # 使用独立的 ASR endpoint，而非 LLM 摘要网关
+    if not api_base or not api_key:
         raise RuntimeError(
-            "ASR 语音识别未配置：WHISPER_API_BASE 为空。"
-            "请在 .env 中设置 WHISPER_API_BASE 和 WHISPER_API_KEY。"
+            "ASR 语音识别未配置。"
+            "请在 .env 中设置 TYPELESS_API_KEY，或设置 WHISPER_API_BASE 和 WHISPER_API_KEY。"
         )
 
     client = openai.OpenAI(
-        api_key=settings.WHISPER_API_KEY or settings.OPENAI_API_KEY,
-        base_url=settings.WHISPER_API_BASE,
+        api_key=api_key,
+        base_url=api_base,
     )
 
     with open(audio_path, "rb") as audio_file:
         response = client.audio.transcriptions.create(
-            model="whisper-1",
+            model=model,
             file=audio_file,
             response_format="verbose_json",
             timestamp_granularities=["segment"],

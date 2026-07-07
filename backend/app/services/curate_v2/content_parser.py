@@ -1,7 +1,6 @@
 """ProseMirror / TipTap JSON content parser.
 
-Extracts plain text and structural metrics from the nested node tree
-returned by watcha.cn's content API.
+Extracts plain text and structural metrics from a nested editor node tree.
 """
 
 from __future__ import annotations

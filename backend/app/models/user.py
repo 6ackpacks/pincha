@@ -18,7 +18,7 @@ class User(Base):
         default=uuid.uuid4,
         server_default=func.gen_random_uuid(),
     )
-    # 观猹 OAuth identity
+    # OAuth identity
     watcha_user_id: Mapped[int | None] = mapped_column(
         BigInteger,
         unique=True,
@@ -38,7 +38,7 @@ class User(Base):
         String(100),
         nullable=True,
     )
-    # 观猹 OAuth tokens (for future API calls / refresh)
+    # OAuth tokens (for future API calls / refresh)
     # SECURITY WARNING: OAuth tokens currently stored in plaintext
     # TODO: Implement encryption using Fernet or AES-256-GCM before production deployment
     # Encryption key should be managed via environment variable OAUTH_ENCRYPTION_KEY

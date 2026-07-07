@@ -28,7 +28,7 @@ def daily_curate_pipeline(target_date: str | None = None) -> dict:
     Main daily pipeline triggered at 05:00 Beijing (21:00 UTC previous day).
 
     Steps:
-    1. Fetch yesterday's content from watcha.cn
+    1. Fetch yesterday's content from the configured source
     2. Score all items (deterministic scoring)
     3. Classify with LLM (one call per item)
     4. Pick top items per channel
@@ -88,11 +88,11 @@ def _run_pipeline(target_date: str | None) -> dict:
     pick_date = resolve_pick_date(target_date)
 
     # Step 1: Fetch yesterday's content and products
-    logger.info("Step 1: Fetching content from watcha.cn...")
+    logger.info("Step 1: Fetching content from configured source...")
     fetched_items = fetch_yesterday_content(pick_date)
     logger.info("Fetched %d items", len(fetched_items))
 
-    logger.info("Step 1b: Fetching new products from watcha.cn...")
+    logger.info("Step 1b: Fetching new products from configured source...")
     fetched_products = fetch_yesterday_products(pick_date)
     logger.info("Fetched %d new products", len(fetched_products))
 

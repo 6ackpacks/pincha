@@ -40,16 +40,22 @@ class Settings(BaseSettings):
     TRANSCRIPTAPI_API_KEY: str = ""
     TRANSCRIPTHQ_API_KEY: str = ""
     CELERY_BROKER_URL: str = "redis://redis:6379/1"
-    SUMMARY_MODEL: str = "openai/deepseek-v4-flash"
-    FAST_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # fast pipeline: express + highlight + full
-    DEEP_SUMMARY_MODEL: str = "openai/deepseek-v4-flash"   # deep pipeline: detailed (background)
-    SUMMARY_API_BASE: str = "https://tokendance.space/gateway/v1"
+    SUMMARY_MODEL: str = "gpt-4o-mini"
+    FAST_SUMMARY_MODEL: str = "gpt-4o-mini"
+    DEEP_SUMMARY_MODEL: str = "gpt-4o-mini"
+    SUMMARY_API_BASE: str = "https://api.openai.com/v1"
     YOUTUBE_COOKIES_PATH: str = "/app/cookies/cookies.txt"
-    EMBEDDING_MODEL: str = "openai/text-embedding-v3"
-    # [DEPRECATED] ASR 已下线，保留字段避免 env 解析报错，下个迭代移除
-    # Whisper ASR endpoint（语音识别，与 LLM 摘要网关分离）
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # Typeless speech-to-text. If TYPELESS_API_KEY is set, ASR uses this
+    # endpoint before the legacy WHISPER_* settings.
+    TYPELESS_API_KEY: str = ""
+    TYPELESS_API_BASE: str = "https://api.typeless.com/v1"
+    TYPELESS_MODEL: str = "whisper-1"
+
+    # OpenAI-compatible speech-to-text endpoint.
     WHISPER_API_BASE: str = ""
     WHISPER_API_KEY: str = ""
+    WHISPER_MODEL: str = "whisper-1"
     # When empty, falls back to SUMMARY_API_BASE / OPENAI_API_KEY respectively
     EMBEDDING_API_BASE: str = ""
     EMBEDDING_API_KEY: str = ""
@@ -58,7 +64,7 @@ class Settings(BaseSettings):
     TIKHUB_API_KEY: str = ""
     TIKHUB_API_BASE: str = "https://api.tikhub.io"
     WIKI_ARTICLE_LIMIT: int = 20
-    WIKI_COMPILER_MODEL: str = "openai/deepseek-v4-flash"
+    WIKI_COMPILER_MODEL: str = "gpt-4o-mini"
     # Phase 0 single-user bypass: fixed user UUID used when no auth
     ADMIN_USER_ID: str = "00000000-0000-0000-0000-000000000001"
     ADMIN_TOKEN: str = ""
@@ -78,11 +84,14 @@ class Settings(BaseSettings):
     # RapidAPI YouTube 音频下载（yt-dlp 被封时的付费兜底）
     RAPIDAPI_KEY: str = ""
 
-    # 观猹 OAuth2
+    # Optional OAuth2 provider.
     WATCHA_CLIENT_ID: str = ""
     WATCHA_CLIENT_SECRET: str = ""
     WATCHA_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/callback"
-    WATCHA_PROXY_URL: str = ""  # e.g. "http://host:port" if server can't reach watcha.cn directly
+    WATCHA_PROXY_URL: str = ""
+    OAUTH_AUTHORIZE_URL: str = "https://example.com/oauth/authorize"
+    OAUTH_TOKEN_URL: str = "https://example.com/oauth/api/token"
+    OAUTH_USERINFO_URL: str = "https://example.com/oauth/api/userinfo"
 
     # JWT 密钥（生产环境必须使用至少 32 字符的随机字符串）
     # 生成方式: python -c "import secrets; print(secrets.token_urlsafe(32))"

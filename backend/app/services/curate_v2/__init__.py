@@ -1,7 +1,7 @@
 """Curate v2 — Content fetching and scoring engine.
 
 This package provides:
-- fetcher: Fetches yesterday's content from watcha.cn API
+- fetcher: Fetches yesterday's content from the configured source API
 - content_parser: Extracts text/metrics from ProseMirror JSON
 - scorer: Deterministic scoring with engagement/structure/authority weights
 - classifier: LLM-based content classification

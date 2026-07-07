@@ -154,7 +154,7 @@ class TestAuthLogin:
             )
         assert resp.status_code in (302, 307)
         location = resp.headers["location"]
-        assert "watcha.cn/oauth/authorize" in location
+        assert "example.com/oauth/authorize" in location
 
     @pytest.mark.asyncio
     async def test_login_redirect_contains_state(self, raw_client, mock_redis):
@@ -254,7 +254,7 @@ class TestAuthCallback:
 
         mock_redis.get = AsyncMock(side_effect=redis_get_side_effect)
 
-        # Mock httpx calls to watcha.cn (httpx responses are sync objects)
+        # Mock httpx calls to the configured OAuth provider.
         mock_token_response = MagicMock()
         mock_token_response.status_code = 200
         mock_token_response.json.return_value = {
@@ -296,7 +296,7 @@ class TestAuthCallback:
 
     @pytest.mark.asyncio
     async def test_callback_userinfo_uses_query_param(self, raw_client, mock_redis, db_session):
-        """userinfo 请求通过 query param 传递 access_token（观猹不接受 Bearer header）."""
+        """userinfo 请求通过 query param 传递 access_token."""
         async def redis_get_side_effect(key):
             if key.startswith("oauth:state:"):
                 return "1"
@@ -337,7 +337,7 @@ class TestAuthCallback:
 
         assert resp.status_code == 302
 
-        # Verify the GET call used query params (观猹要求 access_token 作为 query param)
+        # Verify the GET call used query params.
         mock_httpx_client.get.assert_called_once()
         call_kwargs = mock_httpx_client.get.call_args
         params = call_kwargs.kwargs.get("params") or (call_kwargs[1].get("params") if len(call_kwargs) > 1 else None)

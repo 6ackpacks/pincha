@@ -186,7 +186,7 @@ function PreviewBody({ pick }: { pick: PickDetail }) {
 }
 
 function ProductCard({ pick }: { pick: PickDetail }) {
-  // Extract slug from original_url: https://watcha.cn/products/{slug}
+  // Extract slug from a source URL shaped like /products/{slug}.
   const slug = pick.original_url?.split("/products/")[1] || String(pick.source_id);
 
   const { data: product, isLoading } = useQuery({

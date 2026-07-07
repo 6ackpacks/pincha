@@ -34,7 +34,7 @@ import DOMPurify from "dompurify";
 // ---------------------------------------------------------------------------
 
 // 品猹自身域名：内容来自这些站点不应作为外部线索导入（会处理失败）
-const SELF_HOSTS = ["watcha.cn", "pincha.watcha.cn"];
+const SELF_HOSTS = ["localhost", "127.0.0.1"];
 
 function getUrlHost(url: string): string {
   try {

@@ -18,12 +18,14 @@ node_modules/
 out/
 .turbo/
 
-# Environment
+# Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
-# IDE
+# Local AI / IDE settings
+.claude/settings.local.json
+.claude/*.local.json
 .vscode/
 .idea/
 *.swp
@@ -37,7 +39,17 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 
-# Misc
+# Certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Service account files
+service-account*.json
+credentials*.json
+
+# Logs and caches
 *.log
 *.pid
 *.seed
@@ -49,6 +61,14 @@ htmlcov/
 
 # Cookies (sensitive)
 cookies/
+
+# Local data and volumes
+data/
+uploads/
+storage/
+postgres-data/
+redis-data/
+minio-data/
 
 # SurfSense reference codebase (separate repo)
 SurfSense/

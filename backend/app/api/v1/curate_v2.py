@@ -797,12 +797,15 @@ async def get_product_detail(
     slug: str,
     current_user: User = Depends(get_current_user),
 ):
-    """Proxy to watcha.cn product detail API with reviews."""
+    """Proxy to the configured product detail API."""
     import httpx
+    import os
+
+    source_api_base = os.getenv("CURATE_SOURCE_API_BASE", "https://example.com/api/v2").rstrip("/")
 
     async with httpx.AsyncClient(timeout=15) as client:
         # Fetch product detail
-        resp = await client.get(f"https://watcha.cn/api/v2/products/{slug}")
+        resp = await client.get(f"{source_api_base}/products/{slug}")
         if resp.status_code != 200:
             raise HTTPException(status_code=404, detail="产品不存在")
         data = resp.json()
@@ -865,12 +868,15 @@ async def get_product_reviews(
     skip: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
 ):
-    """Proxy to watcha.cn product reviews API."""
+    """Proxy to the configured product reviews API."""
     import httpx
+    import os
+
+    source_api_base = os.getenv("CURATE_SOURCE_API_BASE", "https://example.com/api/v2").rstrip("/")
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
-            f"https://watcha.cn/api/v2/products/{product_id}/reviews",
+            f"{source_api_base}/products/{product_id}/reviews",
             params={"order_by": "hot", "limit": limit, "skip": skip},
         )
         if resp.status_code != 200:

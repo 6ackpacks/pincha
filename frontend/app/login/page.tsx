@@ -84,7 +84,7 @@ function LoginInner() {
             priority
             className="h-6 w-6 shrink-0 object-contain"
           />
-          使用观猹账号登录
+          使用账号登录
         </a>
 
         {/* Dev login — only works when backend runs in development mode */}
