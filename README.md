@@ -1,6 +1,6 @@
 <table style="width: 100%; table-layout: fixed;">
   <tr>
-    <td width="42%" valign="middle" align="center" style="padding: 20px 14px;">
+    <td width="42%" valign="middle" align="center" style="padding: 30px 14px;">
       <div>
         <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="240" />
       </div>
