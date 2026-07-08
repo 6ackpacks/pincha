@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  把视频、播客、文章与每日线索整理成可检索、可追问、可复用的个人知识库。
+  面向学习者，把视频、播客、文章与每日线索转化为可理解、可沉淀、可追问的知识。
 </p>
 
 <p align="center">
@@ -29,11 +29,9 @@
 
 ## 什么是品猹
 
-品猹是观猹旗下的开源项目，专注把长内容变成可阅读、可追问、可沉淀的知识。
+品猹是观猹旗下的开源项目，面向学习者，解决两个核心问题：更高效地理解内容，更系统地沉淀知识。
 
-它适合两类人：
-- 想本地部署、自己掌控数据的开发者
-- 想快速理解产品、用内容搭建个人知识体系的普通用户
+它帮助你在观看视频、阅读内容时，更快抓住重点，用更少的时间理解更多实质内容；也帮助你把看过的内容沉淀成知识词条和知识图谱，并借助大模型随时提问、总结和提取，让这些内容持续变成你的第二大脑。
 
 ## 大力支持
 
@@ -42,14 +40,14 @@
 </p>
 
 <p align="center">
-  本项目的 AI 能力额度由 TokenDance 支持。
+  品猹的内容处理能力由 TokenDance 提供支持。
 </p>
 
 ## 功能介绍
 
 ### 1. 视频解析
 
-视频解析会把长视频拆成更容易消化的结构：
+视频解析会把长视频拆成更容易消化的结构，帮你在更短的时间里抓住核心内容，而不是被完整时长拖住。
 
 <p align="center">
   <img src="docs/assets/readme/video-analysis.gif" alt="Video analysis demo" width="920" />
@@ -58,32 +56,29 @@
 你会得到：
 - 字幕实时转换
 - 四级摘要
-- 思维导图
+- 可点击跳转的思维导图
 - 基于视频内容的大模型问答
 
-它的目标不是只给你一份摘要，而是把一条长内容变成可继续追问的知识。
+从字幕、摘要到思维导图和问答，品猹把视频变成可以继续理解、继续追问的内容。
 
 ### 2. 观猹内容推送
 
-观猹内容推送会帮你持续筛选值得细读的内容：
+你会得到观猹站内的每日精选推送。
+我们会持续帮你筛出值得细读的内容，你可以把它们当作进入知识库的素材。
 
 <table align="center">
   <tr>
-    <td><img src="docs/assets/readme/daily-push-1.png" alt="Daily push 1" width="180" /></td>
-    <td><img src="docs/assets/readme/daily-push-2.png" alt="Daily push 2" width="180" /></td>
-    <td><img src="docs/assets/readme/daily-push-3.png" alt="Daily push 3" width="180" /></td>
-    <td><img src="docs/assets/readme/daily-push-4.png" alt="Daily push 4" width="180" /></td>
-    <td><img src="docs/assets/readme/daily-push-5.png" alt="Daily push 5" width="180" /></td>
+    <td><img src="docs/assets/readme/daily-push-1.png" alt="Daily push 1" width="260" /></td>
+    <td><img src="docs/assets/readme/daily-push-2.png" alt="Daily push 2" width="260" /></td>
+    <td><img src="docs/assets/readme/daily-push-3.png" alt="Daily push 3" width="260" /></td>
+    <td><img src="docs/assets/readme/daily-push-4.png" alt="Daily push 4" width="260" /></td>
+    <td><img src="docs/assets/readme/daily-push-5.png" alt="Daily push 5" width="260" /></td>
   </tr>
 </table>
 
-你会收到：
-- 订阅频道
-- 每日精选内容
-- 每早八点推送
-- 把最有价值的内容先筛出来
+左右滑动查看这组每日推送截图。
 
-这些内容不只是看过就结束，也可以继续进入知识库。
+我们不是简单把信息堆给你，而是先替你做一层筛选，再把每天真正有价值的内容整理出来，方便你继续阅读、继续沉淀。
 
 ### 3. 知识库
 
