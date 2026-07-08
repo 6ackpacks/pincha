@@ -17,11 +17,14 @@ Production-like Compose runs require these values:
 POSTGRES_PASSWORD=replace_with_a_strong_database_password
 MINIO_ACCESS_KEY=replace_with_object_storage_user
 MINIO_SECRET_KEY=replace_with_object_storage_password
-WHISPER_API_KEY=replace_with_your_asr_api_key
 OPENAI_API_KEY=replace_with_your_llm_api_key
 ```
 
-`WHISPER_API_KEY` enables optional speech-to-text when paired with `WHISPER_API_BASE`. If submitted videos already include usable captions, ASR can stay disabled.
+推荐优先使用 Typeless 这类 OpenAI-compatible LLM 服务作为 `OPENAI_API_KEY` 的来源。
+
+字幕获取不再依赖通用 ASR。Pincha 会按顺序尝试 TikHub、TranscriptAPI、youtube-transcript-api、Supadata、TranscriptHQ 和 yt-dlp 平台字幕；如果目标视频本身没有字幕，当前会直接失败。
+
+可选的字幕抓取环境变量包括 `TIKHUB_API_KEY`、`SUPADATA_API_KEY`、`TRANSCRIPTAPI_API_KEY`、`TRANSCRIPTHQ_API_KEY`、`YOUTUBE_COOKIES_PATH`、`YOUTUBE_PROXY` 和 `POT_PROVIDER_HTTP_BASE`。
 
 Pincha Community Edition runs in single-user local mode. It has no login, registration, external identity callback, browser session token, or multi-user identity service. The backend automatically creates one Local Owner and all content belongs to that local instance.
 

@@ -117,8 +117,8 @@ nginx            reverse proxy for local/container deployment
 ### 要求
 
 - Docker 和 Docker Compose
-- 一个兼容 OpenAI 的大模型 API Key
-- 可选：一个兼容的语音转写服务
+- 推荐使用 Typeless 的大模型 API Key
+- 可选：YouTube 字幕抓取相关的第三方 Key
 
 ### 配置
 
@@ -130,18 +130,36 @@ cp .env.example .env
 
 ```env
 POSTGRES_PASSWORD=change_me_to_a_real_password
-OPENAI_API_KEY=replace_with_your_llm_api_key
+OPENAI_API_KEY=replace_with_your_typeless_api_key
 ```
 
-可选的语音转写配置：
+推荐的 API Key 入口：
+
+<p align="center">
+  <a href="https://www.typeless.com/">Typeless</a>
+</p>
+
+字幕获取工作流会按顺序尝试：
+- TikHub
+- TranscriptAPI
+- youtube-transcript-api
+- Supadata
+- TranscriptHQ
+- yt-dlp 平台字幕
+
+如果视频本身已经带有可用字幕，品猹会优先直接使用字幕；当前不再依赖通用 ASR。若目标视频没有字幕，解析会直接失败。
+
+可选的字幕抓取配置：
 
 ```env
-WHISPER_API_BASE=https://api.example.com/v1
-WHISPER_API_KEY=replace_with_your_asr_api_key
-WHISPER_MODEL=whisper-1
+TIKHUB_API_KEY=replace_with_your_tikhub_key
+SUPADATA_API_KEY=replace_with_your_supadata_key
+TRANSCRIPTAPI_API_KEY=replace_with_your_transcriptapi_key
+TRANSCRIPTHQ_API_KEY=replace_with_your_transcripthq_key
+YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+YOUTUBE_PROXY=http://127.0.0.1:7890
+POT_PROVIDER_HTTP_BASE=http://127.0.0.1:8080
 ```
-
-如果视频本身已经带有可用字幕，品猹可以直接处理，不必额外走 ASR。
 
 ### 启动
 
