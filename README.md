@@ -1,25 +1,18 @@
-<p align="center">
-  <img src="docs/assets/readme/pincha-overview.png" alt="品猹总览" width="1280" />
-</p>
-
-<p align="center">
-  <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="156" />
-</p>
-
-<h1 align="center">品猹 Pincha</h1>
-
-<p align="center">
-  让信息有归处。<br/>
-  Where Content Becomes Knowledge.
-</p>
-
-<p align="center">
-  面向学习者，把视频、播客、文章与每日线索转化为可理解、可沉淀、可追问的知识。
-</p>
-
-<p align="center">
-  体验地址：<a href="https://pincha.watcha.cn/">pincha.watcha.cn</a>，目前免费开放，欢迎直接体验。
-</p>
+<table>
+  <tr>
+    <td width="34%" valign="middle" align="center">
+      <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="220" />
+      <p><strong>品猹 Pincha</strong></p>
+    </td>
+    <td width="66%" valign="middle">
+      <h1 align="left">让信息有归处</h1>
+      <p><strong>让内容清晰，让价值沉淀。</strong></p>
+      <p><em>Where Content Becomes Knowledge.</em></p>
+      <p>体验地址：<a href="https://pincha.watcha.cn/">pincha.watcha.cn</a>，目前免费开放，欢迎直接体验。</p>
+      <p>TokenDance：<a href="https://tokendance.space/">配置入口</a> · <a href="https://tokendance.space/">支持页面</a></p>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-111827"></a>
@@ -31,9 +24,9 @@
 
 ## ✨ 什么是品猹
 
-**品猹**是观猹旗下的开源项目，面向学习者，解决两个核心问题：**更高效地理解内容**，**更系统地沉淀知识**。
+**品猹**是观猹旗下的开源项目，专注把**视频、播客、文章与每日线索**变成更容易理解、可沉淀、可追问的知识。
 
-它帮助你在观看视频、阅读内容时，更快抓住重点，用更少的时间理解更多实质内容；也帮助你把看过的内容沉淀成**知识词条**和**知识图谱**，并借助大模型随时提问、总结和提取，让这些内容持续变成你的**第二大脑**。
+它解决的是两件事：**更快理解内容**，以及**把内容真正留下来**。一方面，品猹帮助你在更短时间里抓住重点，少花时间看完整件事；另一方面，它会把你看过的内容继续整理成**数字化记录**、**知识词条**和**知识图谱**，让这些素材可以被持续追问、持续复用，最后沉淀成你的**第二大脑**。
 
 <hr/>
 
@@ -44,7 +37,8 @@
 </p>
 
 <p align="center">
-  <strong>品猹的内容处理能力由 TokenDance 提供支持。</strong>
+  <strong>品猹的 AI 内容处理能力由 TokenDance 提供支持。</strong><br/>
+  <a href="https://tokendance.space/">配置入口</a> · <a href="https://tokendance.space/">支持页面</a>
 </p>
 
 <hr/>
@@ -75,10 +69,10 @@
 我们会持续帮你筛出值得细读的内容，你可以把它们当作进入知识库的素材。
 
 <p align="center">
-  <img src="docs/assets/readme/daily-push-strip.png" alt="Daily push strip" width="1280" />
+  <img src="docs/assets/readme/curate-push.gif" alt="Daily push demo" width="1280" />
 </p>
 
-这是一组横向长图，打开后可以顺着看完整的每日推送内容。
+这是一段 GIF 演示，展示每日精选内容的实际浏览节奏，而不是静态拼图。
 
 我们不是简单把信息堆给你，而是先替你做一层筛选，再把每天真正有价值的内容整理出来，方便你继续阅读、继续沉淀。
 
@@ -218,23 +212,35 @@ pnpm dev
 
 你只需要在 TokenDance 上获取 API Key，然后填入品猹即可开始使用解析、总结和知识沉淀功能。
 
+TokenDance 入口：<a href="https://tokendance.space/">tokendance.space</a>
+
 #### 2. 字幕获取 API
 
-**品猹的视频解析优先依赖字幕。**
+**字幕获取这块，我们先推荐一个免费入口：TranscriptAPI。**
 
-如果视频本身已经带有可用字幕，品猹会直接使用字幕进行解析；如果没有字幕，当前不会走通用 ASR 兜底。
+如果你只想先跑起来，只配置 **TokenDance + TranscriptAPI** 就够了。后续如果你希望提高命中率，再按需补充其他回退来源。
 
-我们首要推荐的是免费的 **TranscriptAPI**。
-你只需要去 TranscriptAPI 的官方地址获取 API Key，填入后就能直接使用字幕获取能力。
+### 🔎 字幕来源推荐
 
-如果你愿意提升字幕命中率，或者增加更多回退来源，也可以继续配置其他字幕服务。
+| 来源 | 免费/付费 | 推荐级别 | 说明 | 入口 |
+| --- | --- | --- | --- | --- |
+| TranscriptAPI | 免费 | 首要推荐 | 先配它就能开始，适合快速跑通主流程 | https://transcriptapi.com/ |
+| youtube-transcript-api | 免费 | 推荐补充 | 本地库，适合 YouTube 字幕兜底 | https://github.com/jdepoix/youtube-transcript-api |
+| TikHub | 付费 | 推荐补充 | YouTube 字幕覆盖率更强，适合更高命中率 | https://tikhub.io/ |
+| Supadata | 付费 | 推荐补充 | 适合作为 YouTube 字幕回退来源 | https://supadata.ai/ |
+| TranscriptHQ | 付费 | 推荐补充 | 覆盖 YouTube 和部分多平台场景 | https://transcripthq.io/ |
+| yt-dlp 平台字幕 | 免费 | 最后兜底 | 直接抓平台原生字幕，适合本地/平台字幕场景 | https://github.com/yt-dlp/yt-dlp |
+
+**字幕获取逻辑也很简单：**
+- 如果视频本身已经带有可用字幕，品猹会直接使用字幕进行解析
+- 如果没有字幕，系统会依次尝试上面的推荐来源
+- 我们不要求你一次把所有来源都配满，先让最小闭环跑起来最重要
 
 ### 🧰 其他配置
 
 **以下配置都属于可选项。** 如果你只想快速开始，通常只配置 `TokenDance` 和 `TranscriptAPI` 就够了。
 
 ```env
-TIKHUB_API_KEY=your_tikhub_key
 TRANSCRIPTAPI_API_KEY=your_transcriptapi_key
 SUPADATA_API_KEY=
 TRANSCRIPTHQ_API_KEY=
@@ -244,10 +250,9 @@ POT_PROVIDER_HTTP_BASE=
 ```
 
 **这些配置的作用分别是：**
-- `TIKHUB_API_KEY`：YouTube 字幕获取的优先回退来源
-- `TRANSCRIPTAPI_API_KEY`：免费且推荐的字幕获取来源
-- `SUPADATA_API_KEY`：字幕回退来源之一
-- `TRANSCRIPTHQ_API_KEY`：多平台字幕回退来源之一
+- `TRANSCRIPTAPI_API_KEY`：**免费且首要推荐**的字幕获取来源
+- `SUPADATA_API_KEY`：付费字幕回退来源之一
+- `TRANSCRIPTHQ_API_KEY`：付费多平台字幕回退来源之一
 - `YOUTUBE_COOKIES_PATH`：可选的 YouTube cookies 文件路径
 - `YOUTUBE_PROXY`：可选的 YouTube 代理
 - `POT_PROVIDER_HTTP_BASE`：可选的 PO token provider
