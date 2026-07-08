@@ -74,17 +74,11 @@
 **你会得到观猹站内的每日精选推送。**  
 我们会持续帮你筛出值得细读的内容，你可以把它们当作进入知识库的素材。
 
-<table align="center">
-  <tr>
-    <td><img src="docs/assets/readme/daily-push-1.png" alt="Daily push 1" width="260" /></td>
-    <td><img src="docs/assets/readme/daily-push-2.png" alt="Daily push 2" width="260" /></td>
-    <td><img src="docs/assets/readme/daily-push-3.png" alt="Daily push 3" width="260" /></td>
-    <td><img src="docs/assets/readme/daily-push-4.png" alt="Daily push 4" width="260" /></td>
-    <td><img src="docs/assets/readme/daily-push-5.png" alt="Daily push 5" width="260" /></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/assets/readme/daily-push-strip.png" alt="Daily push strip" width="1280" />
+</p>
 
-左右滑动查看这组每日推送截图。
+这是一组横向长图，打开后可以顺着看完整的每日推送内容。
 
 我们不是简单把信息堆给你，而是先替你做一层筛选，再把每天真正有价值的内容整理出来，方便你继续阅读、继续沉淀。
 
