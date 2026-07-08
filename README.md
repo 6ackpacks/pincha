@@ -18,6 +18,10 @@
 </p>
 
 <p align="center">
+  体验地址：<a href="https://pincha.watcha.cn/">pincha.watcha.cn</a>，目前免费开放，欢迎直接体验。
+</p>
+
+<p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-111827"></a>
   <a href="docker-compose.yml"><img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2563eb"></a>
   <img alt="Mode" src="https://img.shields.io/badge/mode-single--user%20local-10b981">
@@ -48,7 +52,7 @@
 视频解析会把长视频拆成更容易消化的结构：
 
 <p align="center">
-  <img src="docs/assets/readme/video-analysis.png" alt="Video analysis view" width="920" />
+  <img src="docs/assets/readme/video-analysis.gif" alt="Video analysis demo" width="920" />
 </p>
 
 你会得到：
@@ -63,9 +67,15 @@
 
 观猹内容推送会帮你持续筛选值得细读的内容：
 
-<p align="center">
-  <img src="docs/assets/readme/curate.png" alt="Curated channels" width="760" />
-</p>
+<table align="center">
+  <tr>
+    <td><img src="docs/assets/readme/daily-push-1.png" alt="Daily push 1" width="180" /></td>
+    <td><img src="docs/assets/readme/daily-push-2.png" alt="Daily push 2" width="180" /></td>
+    <td><img src="docs/assets/readme/daily-push-3.png" alt="Daily push 3" width="180" /></td>
+    <td><img src="docs/assets/readme/daily-push-4.png" alt="Daily push 4" width="180" /></td>
+    <td><img src="docs/assets/readme/daily-push-5.png" alt="Daily push 5" width="180" /></td>
+  </tr>
+</table>
 
 你会收到：
 - 订阅频道
@@ -78,10 +88,6 @@
 ### 3. 知识库
 
 知识库会把视频解析和每日推送沉淀下来，再拆成知识词条，形成知识图谱。你可以点进图谱继续看词条，也可以直接让大模型随时回答问题。
-
-<p align="center">
-  <img src="docs/assets/readme/knowledge-graph.png" alt="Knowledge graph" width="920" />
-</p>
 
 <p align="center">
   <img src="docs/assets/readme/knowledge-base.gif" alt="Knowledge base demo" width="920" />
