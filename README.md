@@ -1,15 +1,21 @@
-<table>
+<table style="width: 100%; table-layout: fixed;">
   <tr>
-    <td width="34%" valign="middle" align="center">
-      <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="220" />
-      <p><strong>品猹 Pincha</strong></p>
+    <td width="42%" valign="middle" align="center" style="padding: 20px 14px;">
+      <div>
+        <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="240" />
+      </div>
+      <div style="margin-top: 28px; font-size: 20px; font-weight: 700;">
+        品猹 Pincha
+      </div>
     </td>
-    <td width="66%" valign="middle">
-      <h1 align="left">让信息有归处</h1>
-      <p><strong>让内容清晰，让价值沉淀。</strong></p>
-      <p><em>Where Content Becomes Knowledge.</em></p>
-      <p>体验地址：<a href="https://pincha.watcha.cn/">pincha.watcha.cn</a>，目前免费开放，欢迎直接体验。</p>
-      <p>TokenDance：<a href="https://tokendance.space/">配置入口</a> · <a href="https://tokendance.space/">支持页面</a></p>
+    <td width="58%" valign="middle" align="center" style="padding: 20px 24px;">
+      <div style="display: flex; min-height: 240px; flex-direction: column; justify-content: center; align-items: center;">
+        <h1 align="center" style="margin: 0;">让信息有归处</h1>
+        <p style="margin: 14px 0 0 0;"><strong>让内容清晰，让价值沉淀。</strong></p>
+        <p style="margin: 12px 0 0 0;"><em>Where Content Becomes Knowledge.</em></p>
+        <p style="margin: 24px 0 0 0;">体验地址：<a href="https://pincha.watcha.cn/">pincha.watcha.cn</a>，目前免费开放，欢迎直接体验。</p>
+        <p style="margin: 14px 0 0 0;">TokenDance：<a href="https://tokendance.space/">配置入口</a> · <a href="https://tokendance.space/">支持页面</a></p>
+      </div>
     </td>
   </tr>
 </table>
