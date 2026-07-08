@@ -1,6 +1,6 @@
 <table style="width: 100%; table-layout: fixed;">
   <tr>
-    <td width="42%" valign="middle" align="center" style="padding: 30px 14px;">
+    <td width="48%" valign="middle" align="center" style="padding: 24px 20px;">
       <div>
         <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="240" />
       </div>
@@ -8,7 +8,7 @@
         品猹 Pincha
       </div>
     </td>
-    <td width="58%" valign="middle" align="center" style="padding: 20px 24px;">
+    <td width="52%" valign="middle" align="center" style="padding: 24px 18px;">
       <div style="display: flex; min-height: 240px; flex-direction: column; justify-content: center; align-items: center;">
         <h1 align="center" style="margin: 0;">让信息有归处</h1>
         <p style="margin: 14px 0 0 0;"><strong>让内容清晰，让价值沉淀。</strong></p>
