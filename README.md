@@ -112,65 +112,156 @@ nginx            reverse proxy for local/container deployment
 
 前端通过类型化 API 客户端和后端通信。长任务会通过轮询或 SSE 上报进度，完成后的结果会被缓存并建立索引，方便后续复用。
 
-## 快速开始
+## 如何自己部署
 
-### 要求
+品猹支持两种使用方式：Docker 部署和本地开发部署。
 
-- Docker 和 Docker Compose
-- 推荐使用 Typeless 的大模型 API Key
-- 可选：YouTube 字幕抓取相关的第三方 Key
+如果你只是想先体验，推荐优先使用 Docker；如果你要改代码或做二次开发，再走本地开发部署。
 
-### 配置
+### 方式一：Docker 部署（推荐）
 
-```bash
-cp .env.example .env
-```
-
-至少配置这些值：
-
-```env
-POSTGRES_PASSWORD=change_me_to_a_real_password
-OPENAI_API_KEY=replace_with_your_typeless_api_key
-```
-
-推荐的 API Key 入口：
-
-<p align="center">
-  <a href="https://www.typeless.com/">Typeless</a>
-</p>
-
-字幕获取工作流会按顺序尝试：
-- TikHub
-- TranscriptAPI
-- youtube-transcript-api
-- Supadata
-- TranscriptHQ
-- yt-dlp 平台字幕
-
-如果视频本身已经带有可用字幕，品猹会优先直接使用字幕；当前不再依赖通用 ASR。若目标视频没有字幕，解析会直接失败。
-
-可选的字幕抓取配置：
-
-```env
-TIKHUB_API_KEY=replace_with_your_tikhub_key
-SUPADATA_API_KEY=replace_with_your_supadata_key
-TRANSCRIPTAPI_API_KEY=replace_with_your_transcriptapi_key
-TRANSCRIPTHQ_API_KEY=replace_with_your_transcripthq_key
-YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
-YOUTUBE_PROXY=http://127.0.0.1:7890
-POT_PROVIDER_HTTP_BASE=http://127.0.0.1:8080
-```
-
-### 启动
+最简单的部署方式，一行命令即可启动：
 
 ```bash
 docker compose up --build
 ```
 
-打开：
+访问 `http://localhost:3000`，在 Web 界面的设置页面配置你的 API Key 即可使用。
 
-- App: http://localhost:3000
-- API health: http://localhost:8000/health
+Docker 部署说明：
+- 容器内不包含任何 API Key，需要在 Web 界面配置
+- `history` 目录用于持久化历史记录
+- `output` 目录用于持久化生成结果
+- 如有需要，也可以挂载自定义配置文件
+
+### 方式二：本地开发部署
+
+前置要求：
+- Python 3.11+
+- Node.js 18+
+- pnpm
+- uv
+
+#### 1. 克隆项目
+
+```bash
+git clone <你的仓库地址>
+cd pincha
+```
+
+#### 2. 配置基础环境
+
+```bash
+cp .env.example .env
+```
+
+然后在 Web 界面或 `.env` 中配置最基础的 API Key。
+
+#### 3. 安装依赖
+
+后端：
+
+```bash
+uv sync
+```
+
+前端：
+
+```bash
+cd frontend
+pnpm install
+```
+
+#### 4. 启动服务
+
+一键启动（推荐）：
+
+- macOS：`start.sh` 或双击 `scripts/start-macos.command`
+- Linux：`./start.sh`
+- Windows：双击 `start.bat`
+
+启动后会自动打开浏览器访问 `http://localhost:5173`
+
+手动启动：
+
+后端：
+
+```bash
+uv run python -m backend.app
+```
+
+前端：
+
+```bash
+cd frontend
+pnpm dev
+```
+
+访问：
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:3000` 或你的实际配置地址
+
+## 配置说明
+
+### 推荐配置
+
+#### 1. 大模型 API Key
+
+品猹的内容理解、摘要生成、知识抽取和问答能力，都依赖大模型 API。
+
+我们推荐使用 TokenDance 作为主要的大模型服务入口。
+
+你只需要在 TokenDance 上获取 API Key，然后填入品猹即可开始使用解析、总结和知识沉淀功能。
+
+#### 2. 字幕获取 API
+
+品猹的视频解析优先依赖字幕。
+
+如果视频本身已经带有可用字幕，品猹会直接使用字幕进行解析；如果没有字幕，当前不会走通用 ASR 兜底。
+
+我们首要推荐的是免费的 TranscriptAPI。
+你只需要去 TranscriptAPI 的官方地址获取 API Key，填入后就能直接使用字幕获取能力。
+
+如果你愿意提升字幕命中率，或者增加更多回退来源，也可以继续配置其他字幕服务。
+
+### 其他配置
+
+以下配置都属于可选项。如果你只想快速开始，通常只配置 `TokenDance` 和 `TranscriptAPI` 就够了。
+
+```env
+TIKHUB_API_KEY=your_tikhub_key
+TRANSCRIPTAPI_API_KEY=your_transcriptapi_key
+SUPADATA_API_KEY=
+TRANSCRIPTHQ_API_KEY=
+YOUTUBE_COOKIES_PATH=/app/cookies/cookies.txt
+YOUTUBE_PROXY=
+POT_PROVIDER_HTTP_BASE=
+```
+
+这些配置的作用分别是：
+- `TIKHUB_API_KEY`：YouTube 字幕获取的优先回退来源
+- `TRANSCRIPTAPI_API_KEY`：免费且推荐的字幕获取来源
+- `SUPADATA_API_KEY`：字幕回退来源之一
+- `TRANSCRIPTHQ_API_KEY`：多平台字幕回退来源之一
+- `YOUTUBE_COOKIES_PATH`：可选的 YouTube cookies 文件路径
+- `YOUTUBE_PROXY`：可选的 YouTube 代理
+- `POT_PROVIDER_HTTP_BASE`：可选的 PO token provider
+
+### 推荐使用顺序
+
+如果你只是想先跑起来，建议按这个顺序配置：
+
+1. TokenDance 的大模型 API Key
+2. TranscriptAPI 的字幕 API Key
+3. 先不配其他回退项，确认主流程可用后再补充
+
+### 注意事项
+
+- 容器里不会内置任何 API Key，需要你自己在 Web 界面或环境变量里配置
+- 品猹的视频解析依赖字幕，优先使用已有字幕
+- 如果目标视频没有字幕，当前不会走通用 ASR 兜底
+- `TranscriptAPI` 是我们最推荐的字幕入口，免费且足够直接
+- 其他字幕配置主要用于补充回退，不是必需项
 
 ## 开发
 
