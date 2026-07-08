@@ -1,6 +1,6 @@
 <table style="width: 100%; table-layout: fixed;">
   <tr>
-    <td width="48%" valign="middle" align="center" style="padding: 24px 20px;">
+    <td width="45%" valign="middle" align="center" style="padding: 24px 20px;">
       <div>
         <img src="frontend/public/brand/pincha-script.svg" alt="品猹 Pincha" width="240" />
       </div>
@@ -8,7 +8,7 @@
         品猹 Pincha
       </div>
     </td>
-    <td width="52%" valign="middle" align="center" style="padding: 24px 18px;">
+    <td width="55%" valign="middle" align="center" style="padding: 24px 18px;">
       <div style="display: flex; min-height: 240px; flex-direction: column; justify-content: center; align-items: center;">
         <h1 align="center" style="margin: 0;">让信息有归处</h1>
         <p style="margin: 14px 0 0 0;"><strong>让内容清晰，让价值沉淀。</strong></p>
@@ -77,8 +77,6 @@
 <p align="center">
   <img src="docs/assets/readme/curate-push.gif" alt="Daily push demo" width="1280" />
 </p>
-
-这是一段 GIF 演示，展示每日精选内容的实际浏览节奏，而不是静态拼图。
 
 我们不是简单把信息堆给你，而是先替你做一层筛选，再把每天真正有价值的内容整理出来，方便你继续阅读、继续沉淀。
 
