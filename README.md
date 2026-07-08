@@ -21,7 +21,7 @@
 </table>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-111827"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-111827"></a>
   <a href="docker-compose.yml"><img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2563eb"></a>
   <img alt="Mode" src="https://img.shields.io/badge/mode-single--user%20local-10b981">
 </p>
@@ -337,4 +337,4 @@ npm run test:e2e
 
 ## 📄 许可证
 
-Apache 2.0，见 [LICENSE](LICENSE)。
+CC BY-NC-SA 4.0，见 [LICENSE](LICENSE)。
