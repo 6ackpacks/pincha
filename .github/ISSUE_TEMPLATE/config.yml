@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题
+    url: https://github.com/WatchaAI/pincha/security/advisories/new
+    about: 请不要公开提交漏洞细节。安全问题请使用私有安全报告入口。
+  - name: 在线体验
+    url: https://pincha.watcha.cn/
+    about: 先体验线上版本，确认问题是否也会在当前版本中出现。
